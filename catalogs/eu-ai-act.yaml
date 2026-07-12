@@ -1,0 +1,300 @@
+framework: eu-ai-act
+name: EU AI Act
+version: "Regulation (EU) 2024/1689 (incl. Digital Omnibus adjustments)"
+source: "Regulation (EU) 2024/1689 laying down harmonised rules on artificial intelligence (Artificial Intelligence Act), Official Journal L, 12 July 2024."
+description: >
+  Self-assessment for providers and deployers of high-risk AI systems and
+  AI systems that act. Questions are grounded in the Act's operative articles;
+  automated checks corroborate the record-keeping, oversight, and robustness
+  controls against your exported logs. This is a preparation aid, not a legal
+  conformity assessment or a substitute for a notified body.
+
+dimensions:
+  - id: scope_risk
+    title: Scope, prohibited practices & risk management
+    description: Articles 5 and 9 — what you may not do at all, and the risk-management system for what you may.
+  - id: data_governance
+    title: Data & data governance
+    description: Article 10 — data quality, representativeness, and bias mitigation.
+  - id: documentation_records
+    title: Technical documentation & record-keeping
+    description: Articles 11 (Annex IV) and 12 — the paper trail and the automatic logs.
+  - id: transparency_oversight
+    title: Transparency & human oversight
+    description: Articles 13 and 14 — informing users and keeping a human meaningfully in control.
+  - id: robustness_quality
+    title: Accuracy, robustness, security & quality management
+    description: Articles 15 and 17 — the system works, resists attack, and is managed under a QMS.
+  - id: deployer_incident
+    title: Deployer obligations, monitoring & incidents
+    description: Articles 26, 72 and 79 — using the system correctly and reporting when it goes wrong.
+
+controls:
+  # ── Scope, prohibited practices & risk management ──────────────────────────
+  - id: art_5_prohibited
+    dimension: scope_risk
+    framework_ref: "Art. 5"
+    title: No prohibited practices
+    question: >
+      Have you confirmed the AI system does not perform any Article 5
+      prohibited practice (e.g. social scoring, manipulative techniques,
+      untargeted facial-image scraping, real-time remote biometric ID)?
+    guidance: Article 5 is an outright ban, not a control to mitigate. A single prohibited use makes the system unlawful.
+    weight: 3
+    remediation: >
+      Remove the prohibited functionality or the use case entirely. No amount
+      of downstream governance makes an Article 5 practice compliant.
+
+  - id: art_9_risk_system
+    dimension: scope_risk
+    framework_ref: "Art. 9"
+    title: Risk-management system established
+    question: >
+      Do you operate a documented, continuously maintained risk-management
+      system across the AI system's lifecycle (identify, estimate, evaluate,
+      mitigate)?
+    weight: 2
+    remediation: >
+      Stand up a lifecycle risk-management process with a written risk register.
+      A runtime policy layer (per-route/per-key policy graph with tiered rules)
+      turns the register into enforced controls rather than a static document.
+
+  - id: art_9_residual_risk
+    dimension: scope_risk
+    framework_ref: "Art. 9(5)"
+    title: Residual risks judged acceptable and communicated
+    question: >
+      Are residual risks (after mitigation) evaluated, documented, and judged
+      acceptable, with any needed information provided to deployers?
+    remediation: >
+      Document residual risk per identified hazard and the basis for accepting
+      it; surface deployer-facing information in your instructions for use.
+
+  # ── Data & data governance ────────────────────────────────────────────────
+  - id: art_10_data_quality
+    dimension: data_governance
+    framework_ref: "Art. 10(2)-(3)"
+    title: Training/validation/test data quality
+    question: >
+      Are your training, validation, and test datasets relevant, sufficiently
+      representative, and (to the best extent possible) free of errors and
+      complete for the intended purpose?
+    guidance: For hosted/frontier models you do not train, this covers the inference-time data you govern and any fine-tuning or retrieval data you control.
+    weight: 2
+    remediation: >
+      Document dataset provenance and quality criteria for data you control.
+      Where the base model is provider-managed, record that boundary and govern
+      inference-time and retrieval data with classification at ingest and egress.
+
+  - id: art_10_bias
+    dimension: data_governance
+    framework_ref: "Art. 10(2)(f)-(g)"
+    title: Bias examination and mitigation
+    question: >
+      Do you examine datasets for possible biases likely to affect health,
+      safety, or fundamental rights, and take measures to detect, prevent, and
+      mitigate them?
+    weight: 2
+    remediation: >
+      Add bias testing to your evaluation suite for outcomes that affect
+      individuals; record findings and mitigations. Route flagged outputs to
+      review rather than letting them act unattended.
+
+  - id: art_10_special_categories
+    dimension: data_governance
+    framework_ref: "Art. 10(5)"
+    title: Special-category data safeguards
+    question: >
+      Where special categories of personal data are processed for bias
+      monitoring, are the strict safeguards and access controls in place?
+    remediation: >
+      Restrict special-category processing to what is strictly necessary, with
+      access controls, pseudonymisation, and deletion policies. Classify and
+      barrier sensitive fields so agents cannot exfiltrate them.
+
+  # ── Technical documentation & record-keeping ──────────────────────────────
+  - id: art_11_annex_iv
+    dimension: documentation_records
+    framework_ref: "Art. 11 / Annex IV"
+    title: Technical documentation maintained (Annex IV)
+    question: >
+      Do you maintain up-to-date technical documentation demonstrating
+      compliance per Annex IV (system description, development, monitoring,
+      performance, risk management)?
+    weight: 2
+    remediation: >
+      Maintain a living technical file. An AI inventory (every provider, model,
+      and route in use) plus a signed bill-of-materials keeps Annex IV current
+      instead of a once-a-year scramble.
+
+  - id: art_12_logging
+    dimension: documentation_records
+    framework_ref: "Art. 12(1)"
+    title: Automatic logging over the lifecycle
+    question: >
+      Does the system automatically record events (logs) over its lifetime,
+      capturing inputs, outputs, model/provider, identity, and decisions?
+    guidance: Compass can corroborate this from an exported request-log file.
+    weight: 3
+    auto_checks: [logging_completeness]
+    remediation: >
+      Emit a per-request log capturing input, output, model, provider, latency,
+      cost, the acting identity, and any policy decision. A gateway that sees
+      every call is the natural chokepoint to produce these logs uniformly.
+
+  - id: art_12_traceability
+    dimension: documentation_records
+    framework_ref: "Art. 12(2)-(3)"
+    title: Tamper-evident traceability
+    question: >
+      Are the logs protected so that a record of operation can be reconstructed
+      and their integrity independently verified (tamper-evidence)?
+    guidance: Compass can verify an exported hash-chained audit log offline.
+    weight: 3
+    auto_checks: [audit_chain_integrity]
+    remediation: >
+      Hash-chain the log (each entry signs over the previous) so insertion,
+      deletion, or mutation is detectable, and publish an independent verifier a
+      regulator can run without trusting the system that produced the log.
+
+  # ── Transparency & human oversight ────────────────────────────────────────
+  - id: art_13_transparency
+    dimension: transparency_oversight
+    framework_ref: "Art. 13"
+    title: Transparency to users
+    question: >
+      Are users informed they are interacting with / relying on an AI system,
+      and given the information needed to interpret and use its output
+      correctly?
+    remediation: >
+      Provide instructions for use and surface AI-involvement to end users.
+      Expose transparency signals (banners/headers) that downstream UIs render.
+
+  - id: art_14_oversight_design
+    dimension: transparency_oversight
+    framework_ref: "Art. 14(1)-(4)"
+    title: Human oversight designed in
+    question: >
+      Is the system designed so a natural person can effectively oversee it —
+      understand its limits, monitor operation, interpret output, and decide not
+      to use it or to intervene?
+    weight: 2
+    remediation: >
+      Build oversight into the workflow: hold high-stakes actions for a human,
+      make the decision context legible, and give the overseer a real stop.
+
+  - id: art_14_intervention
+    dimension: transparency_oversight
+    framework_ref: "Art. 14(4)(d)-(e)"
+    title: Ability to intervene or stop
+    question: >
+      Can an authorised human intervene in, override, or halt the system's
+      operation (including a "stop" that is honoured mid-execution)?
+    weight: 2
+    auto_checks: [action_risk_coverage]
+    remediation: >
+      Provide a kill switch / emergency stop that takes the system offline or
+      read-only, and hold irreversible (T3) actions for approval so intervention
+      is possible before, not after, the action.
+
+  - id: art_14_oversight_effectiveness
+    dimension: transparency_oversight
+    framework_ref: "Art. 14 (effectiveness)"
+    title: Oversight is meaningful, not ceremonial
+    question: >
+      Do you measure whether human oversight is effective (e.g. override rate,
+      review latency) rather than assuming approvals are considered?
+    guidance: Compass can compute override rate, approval latency, and outlier reviewers from exported approval tickets.
+    auto_checks: [human_oversight]
+    remediation: >
+      Track override rate (rubber-stamping), approval latency (automation bias),
+      and outlier reviewers; alert when oversight looks ceremonial and re-train
+      or re-staff the review function.
+
+  # ── Accuracy, robustness, security & quality management ────────────────────
+  - id: art_15_accuracy
+    dimension: robustness_quality
+    framework_ref: "Art. 15(1)-(3)"
+    title: Accuracy and appropriate metrics
+    question: >
+      Does the system achieve an appropriate level of accuracy for its purpose,
+      with metrics declared and monitored across the lifecycle?
+    remediation: >
+      Score response quality and hallucination confidence per request; run
+      A/B/regression comparison across providers and alert on degradation.
+
+  - id: art_15_robustness_security
+    dimension: robustness_quality
+    framework_ref: "Art. 15(4)-(5)"
+    title: Robustness and cybersecurity
+    question: >
+      Is the system resilient to errors, faults, and adversarial manipulation
+      (data/model poisoning, prompt injection, evasion), with security controls
+      in place?
+    weight: 2
+    remediation: >
+      Add adversarial/robustness testing and block destructive prompts and tool
+      calls deterministically. Treat prompt injection as a security boundary,
+      not a UX bug.
+
+  - id: art_17_qms
+    dimension: robustness_quality
+    framework_ref: "Art. 17"
+    title: Quality management system
+    question: >
+      Do you operate a quality-management system ensuring compliance is
+      maintained throughout the lifecycle (responsibilities, procedures,
+      testing, corrective action)?
+    remediation: >
+      Run a repeatable QMS: scheduled rescans (PII, multi-turn attacks,
+      anomalies), framework evidence reports, and a findings pipeline that
+      closes the loop rather than just logging.
+
+  # ── Deployer obligations, monitoring & incidents ──────────────────────────
+  - id: art_26_deployer_use
+    dimension: deployer_incident
+    framework_ref: "Art. 26(1)-(3)"
+    title: Deployer uses system per instructions with oversight
+    question: >
+      (Deployers) Do you use the system per the provider's instructions, assign
+      competent human oversight, and monitor operation?
+    remediation: >
+      Assign named, competent overseers; stamp every request with the acting
+      user, groups, and department; follow the provider's instructions for use.
+
+  - id: art_26_deployer_logs
+    dimension: deployer_incident
+    framework_ref: "Art. 26(6)"
+    title: Deployer keeps logs
+    question: >
+      (Deployers) Do you retain the automatically generated logs under your
+      control for the required period?
+    auto_checks: [logging_completeness]
+    remediation: >
+      Retain logs for the period the Act requires (generally >= 6 months unless
+      other law applies) with tamper-evidence and defined retention.
+
+  - id: art_72_post_market
+    dimension: deployer_incident
+    framework_ref: "Art. 72"
+    title: Post-market monitoring
+    question: >
+      Do you have a post-market monitoring system that actively collects and
+      reviews performance and incident data after deployment?
+    remediation: >
+      Continuously monitor live traffic and egress for anomalies; feed findings
+      back into the risk-management system and technical documentation.
+
+  - id: art_79_incident_reporting
+    dimension: deployer_incident
+    framework_ref: "Art. 73 / 79"
+    title: Serious-incident reporting
+    question: >
+      Can you detect and report serious incidents and malfunctions to the
+      relevant authority within the Act's timelines?
+    weight: 2
+    auto_checks: [audit_chain_integrity]
+    remediation: >
+      Wire severity-tagged events to an incident pipeline with the evidence
+      range attached, so an Article 73/79 report can be filed within the
+      deadline instead of reconstructed by hand.

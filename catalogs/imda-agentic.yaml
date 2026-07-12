@@ -1,0 +1,387 @@
+framework: imda
+name: IMDA Model AI Governance Framework for Agentic AI
+version: "v1.5 (20 May 2026, upd. 5 June 2026)"
+source: "IMDA / AI Verify Foundation, Model AI Governance Framework for Agentic AI, v1.5, 53 pp."
+description: >
+  Self-assessment for agentic AI systems against Singapore's IMDA framework.
+  The framework's central claim is that governance belongs in a deterministic
+  enforcement plane between the agent and the systems it touches -- not in
+  prompts. Questions follow the framework's four dimensions plus the
+  cross-cutting perimeter/taint concern; automated checks corroborate the
+  identity, oversight, audit, and logging controls against exported evidence.
+
+dimensions:
+  - id: assess_bound
+    title: 1. Assess and bound the risks upfront
+    description: Use-case suitability, agent limits, identity, and least-privilege permissions.
+  - id: human_accountable
+    title: 2. Make humans meaningfully accountable
+    description: Responsibility allocation and oversight that is meaningful rather than ceremonial.
+  - id: technical_controls
+    title: 3. Implement technical controls and processes
+    description: Deterministic controls, MCP governance, testing, monitoring, and change management.
+  - id: end_user
+    title: 4. Enable end-user responsibility
+    description: Informed users, training, and tradecraft preservation.
+  - id: perimeter
+    title: Cross-cutting - perimeter, taint & boundary crossing
+    description: Tracking and propagating data as it crosses trust and organisational boundaries.
+
+controls:
+  # ── Dimension 1 — Assess and bound the risks upfront ───────────────────────
+  - id: identity_verifiable
+    dimension: assess_bound
+    framework_ref: "p.23"
+    title: Agent identity unique & cryptographically verifiable
+    question: >
+      Does every agent have a unique identity that a third party can verify
+      cryptographically (e.g. an asymmetric-signed credential verifiable with a
+      published public key)?
+    guidance: Compass can verify exported Ed25519 agent credentials offline against a JWKS or public key.
+    weight: 3
+    auto_checks: [agent_identity]
+    remediation: >
+      Issue each agent a signed credential (Ed25519) binding agent to principal
+      with scopes and TTL, and publish the issuer public key (JWKS) so partners
+      and auditors verify offline without a shared secret.
+
+  - id: identity_accounted
+    dimension: assess_bound
+    framework_ref: "p.23"
+    title: Identity tied to a human / department / supervising agent
+    question: >
+      Is each agent identity accounted for -- tied to a responsible human,
+      department, or supervising agent?
+    weight: 2
+    remediation: >
+      Store the principal (human/institution), owning department, and any
+      supervising agent on the credential so every action has an accountable
+      owner.
+
+  - id: identity_capacity
+    dimension: assess_bound
+    framework_ref: "p.23"
+    title: Identity differentiated by capacity (on-behalf-of), enforced inline
+    question: >
+      Is the presented agent identity validated on the request path (revocation,
+      expiry, signature) before the action runs, and stamped on the log?
+    weight: 2
+    auto_checks: [agent_identity]
+    remediation: >
+      Validate the credential inline before egress (revocation -> expiry ->
+      signature -> validity) and record the resolved agent and principal on the
+      request log, rather than trusting an unverified header.
+
+  - id: identity_delegation
+    dimension: assess_bound
+    framework_ref: "p.23"
+    title: Recursive sub-agent delegation chains
+    question: >
+      When an agent spawns sub-agents, is the delegation chain represented and
+      constrained (parent -> child authority never exceeds the parent)?
+    remediation: >
+      Model a parent/delegation field on credentials and enforce that a child
+      agent's effective scope is a subset of its parent's. (Advanced; often the
+      last control teams implement.)
+
+  - id: identity_catalogued
+    dimension: assess_bound
+    framework_ref: "p.23"
+    title: Identities catalogued & centrally managed
+    question: >
+      Are agent identities catalogued in a central registry (with revoke) so
+      identity sprawl is prevented and every live credential is enumerable?
+    auto_checks: [agent_identity]
+    remediation: >
+      Keep a central registry of credentials with revoke, and enumerate live
+      agent identities in a signed bill-of-materials (principal, scopes, alg,
+      expiry).
+
+  - id: authz_least_privilege
+    dimension: assess_bound
+    framework_ref: "p.24"
+    title: Authorization scoped, least-privilege, time/session-bound
+    question: >
+      Is each agent's authorization scoped to least privilege, time- or
+      session-bound, and non-transferable (a stolen credential cannot be reused
+      elsewhere)?
+    weight: 2
+    remediation: >
+      Give agents scoped, expiring credentials (model/route allowlists, budgets,
+      TTL) and bind the credential to the bearer so it is non-transferable.
+
+  - id: authz_bounded_by_human
+    dimension: assess_bound
+    framework_ref: "p.24"
+    title: Authorization bounded by the authorizing human's permissions
+    question: >
+      Is an agent's effective authority the intersection of its granted scope
+      and the authorizing human's own permissions (agent subset of human)?
+    remediation: >
+      Compute effective scope = agent scope intersect human scope at runtime,
+      filtering policy by the authorizing human's directory groups/department.
+
+  - id: deterministic_limits
+    dimension: assess_bound
+    framework_ref: "p.19"
+    title: Deterministic limits preferred over prompt instructions
+    question: >
+      Are the agent's hard limits enforced by deterministic, system-level
+      controls on the request path rather than by prompt instructions?
+    weight: 2
+    auto_checks: [action_risk_coverage]
+    remediation: >
+      Move limits out of the prompt and into a deterministic enforcement layer
+      that blocks on the request path regardless of what the model was told.
+
+  - id: blast_radius
+    dimension: assess_bound
+    framework_ref: "p.19"
+    title: Take agents offline / limit blast radius on malfunction
+    question: >
+      Can you take agents offline or limit blast radius on malfunction (circuit
+      breaker, gateway-wide emergency stop: off / read-only / halt)?
+    weight: 2
+    auto_checks: [action_risk_coverage]
+    remediation: >
+      Add a gateway-wide emergency stop with off/read-only/halt modes and a
+      circuit breaker, and record activations in the audit chain.
+
+  # ── Dimension 2 — Make humans meaningfully accountable ─────────────────────
+  - id: approval_checkpoints
+    dimension: human_accountable
+    framework_ref: "p.29"
+    title: Human approval at significant checkpoints
+    question: >
+      Are high-stakes / irreversible actions held for human approval at
+      significant checkpoints before they execute?
+    weight: 3
+    auto_checks: [action_risk_coverage, human_oversight]
+    remediation: >
+      Route irreversible (T3) actions to an approval queue and block until a
+      verified human decides; retry only with the approval token.
+
+  - id: approval_context
+    dimension: human_accountable
+    framework_ref: "p.29"
+    title: Approval requests are contextual and digestible
+    question: >
+      Do approval requests carry enough context (rule, severity, risk/confidence)
+      for a human to decide meaningfully?
+    remediation: >
+      Include the triggering rule, severity, affected resource, and a
+      risk/confidence summary in each approval payload.
+
+  - id: deny_by_default
+    dimension: human_accountable
+    framework_ref: "p.30"
+    title: Deny-by-default when approval infrastructure fails
+    question: >
+      When the approval or policy infrastructure is unavailable, does the system
+      fail closed (deny) for risky actions rather than fail open?
+    weight: 2
+    remediation: >
+      Set policy fail-closed and make tier >= T2 actions block when the approval
+      store is unreachable; keep critical/T3 closed even in shadow mode.
+
+  - id: track_override_rate
+    dimension: human_accountable
+    framework_ref: "p.30"
+    title: Track human override rate (rubber-stamping signal)
+    question: >
+      Do you track the human override rate globally and per reviewer, and alert
+      when it drops below a floor (rubber-stamping)?
+    auto_checks: [human_oversight]
+    remediation: >
+      Compute override rate over a rolling window and alert reviewers below the
+      floor (e.g. 5%). Compass computes this from exported approval tickets.
+
+  - id: track_response_time
+    dimension: human_accountable
+    framework_ref: "p.30"
+    title: Track approval response time (automation-bias signal)
+    question: >
+      Do you track approval response time and alert when decisions are faster
+      than a human could meaningfully review (automation bias)?
+    auto_checks: [human_oversight]
+    remediation: >
+      Measure median approval latency (created -> decided) and alert below a
+      floor (e.g. 3s).
+
+  - id: detect_outlier_reviewers
+    dimension: human_accountable
+    framework_ref: "p.30"
+    title: Detect outlier reviewers
+    question: >
+      Do you detect reviewers whose behaviour deviates from the cohort
+      (compromised or inattentive oversight)?
+    auto_checks: [human_oversight]
+    remediation: >
+      Flag reviewers deviating beyond a sigma threshold from cohort override
+      rate / latency, guarded by a minimum sample size.
+
+  - id: alert_unauthorized
+    dimension: human_accountable
+    framework_ref: "p.30"
+    title: Alerts on unauthorised access / repeated failed calls
+    question: >
+      Do you alert on unauthorised access attempts or repeated failed tool
+      calls (not just log them)?
+    remediation: >
+      Wire access denials and repeated failures to an alerting pipeline
+      (Slack/Teams/webhook), not just an info/warn log line.
+
+  # ── Dimension 3 — Implement technical controls and processes ───────────────
+  - id: structural_controls
+    dimension: technical_controls
+    framework_ref: "p.33"
+    title: Structural / rule-based controls over prompt-layer
+    question: >
+      Are the primary safety controls structural (rule-based, on the request
+      path) rather than relying on the prompt to behave?
+    weight: 2
+    remediation: >
+      Enforce block/approve/warn decisions deterministically before dispatch;
+      treat prompt-level guidance as defence-in-depth, not the control.
+
+  - id: mcp_whitelisting
+    dimension: technical_controls
+    framework_ref: "p.34"
+    title: MCP server whitelisting - only trusted servers
+    question: >
+      Are agents restricted to a whitelist of trusted MCP servers, with
+      untrusted/unapproved servers denied before dispatch?
+    weight: 2
+    remediation: >
+      Maintain an MCP trust registry and deny calls to untrusted or unapproved
+      servers on the request path; hash-chain the denials.
+
+  - id: log_all_interactions
+    dimension: technical_controls
+    framework_ref: "p.34"
+    title: Log all agent-to-system interactions
+    question: >
+      Are all agent-to-system interactions (including tool calls) logged through
+      the governance layer, including blocked attempts?
+    weight: 2
+    auto_checks: [logging_completeness]
+    remediation: >
+      Log every tool call and seal blocked actions into the same tamper-evident
+      chain as successful ones -- denials must not be silently dropped.
+
+  - id: filter_sensitive_mcp
+    dimension: technical_controls
+    framework_ref: "p.34"
+    title: Filter sensitive data passing through MCP
+    question: >
+      Is sensitive data passing through the tool/MCP layer scanned and, where
+      needed, filtered or redacted?
+    remediation: >
+      Run a compliance/PII scan on MCP requests and responses; redact or block
+      regulated content before it leaves the perimeter.
+
+  - id: sandbox_execution
+    dimension: technical_controls
+    framework_ref: "p.34"
+    title: Sandbox code execution invoked via tools
+    question: >
+      Is code execution invoked through tools sandboxed / confined?
+    remediation: >
+      Sandbox tool-invoked execution (e.g. OS-level confinement) so a
+      compromised tool cannot reach the host or network freely.
+
+  - id: tamper_proof_audit
+    dimension: technical_controls
+    framework_ref: "Terminal 3, p.35"
+    title: Tamper-proof audit trail including blocked actions
+    question: >
+      Is there a tamper-proof audit trail covering successful AND blocked
+      actions, each stamped with a risk tier?
+    guidance: Compass can verify an exported hash-chained audit log offline.
+    weight: 3
+    auto_checks: [audit_chain_integrity]
+    remediation: >
+      Hash-chain every action (seq / prev_hash / signed entry), seal blocked
+      actions too, and stamp each with its action-risk tier.
+
+  - id: runtime_controls
+    dimension: technical_controls
+    framework_ref: "p.33"
+    title: Runtime controls - rate limits, input validation
+    question: >
+      Are runtime controls in place (rate limiting, input validation, ability to
+      intervene during execution)?
+    remediation: >
+      Add rate limiting (fixed + adaptive) and input validation, and ensure an
+      operator can intervene mid-execution.
+
+  - id: continuous_monitoring
+    dimension: technical_controls
+    framework_ref: "p.42"
+    title: Continuous monitoring & anomaly detection post-deploy
+    question: >
+      Do you continuously monitor agent behaviour post-deployment and detect
+      anomalies (including agent-trajectory anomalies)?
+    remediation: >
+      Monitor live traffic and egress; add anomaly detection over agent
+      trajectories, not just per-request metrics.
+
+  - id: change_management
+    dimension: technical_controls
+    framework_ref: "p.33"
+    title: Change management / version control for agents
+    question: >
+      Do you version agents and re-certify on change (drift triggers a
+      re-assessment)?
+    remediation: >
+      Track agent versions in a signed BOM and trigger re-certification on
+      material change or drift.
+
+  # ── Dimension 4 — Enable end-user responsibility ───────────────────────────
+  - id: inform_users_actions
+    dimension: end_user
+    framework_ref: "p.46"
+    title: Inform users of the agent's range of actions / data access
+    question: >
+      Are end users informed of the agent's range of actions and the data it can
+      access?
+    remediation: >
+      Surface the agent's permitted actions, accessible data classes, and
+      budgets to end users (dashboard or in-product disclosure).
+
+  - id: training_tradecraft
+    dimension: end_user
+    framework_ref: "p.47"
+    title: Training & tradecraft preservation
+    question: >
+      Do you train users and preserve human tradecraft so skills do not atrophy
+      as agents take over tasks?
+    guidance: This is an organisational/process control, not a product feature. Answer 'na' if handled outside the AI system.
+    remediation: >
+      Provide user training and maintain periodic human-in-the-loop practice so
+      expertise is retained.
+
+  # ── Cross-cutting — perimeter / taint ──────────────────────────────────────
+  - id: track_boundary_crossing
+    dimension: perimeter
+    framework_ref: "p.12, p.17"
+    title: Track data crossing trust / org boundaries
+    question: >
+      Do you track and record when data crosses trust or organisational
+      boundaries (egress classification / marking)?
+    weight: 2
+    auto_checks: [logging_completeness]
+    remediation: >
+      Classify each destination (internal / external-trusted / external-public /
+      unknown) and mark egress on the request log.
+
+  - id: multi_hop_taint
+    dimension: perimeter
+    framework_ref: "p.12"
+    title: Multi-hop taint propagation across agent chains
+    question: >
+      Is taint propagated across multi-hop agent chains (a sensitive input stays
+      labelled as it flows agent -> agent -> tool)?
+    remediation: >
+      Propagate taint labels across A2A hops so a downstream agent knows an input
+      originated from a sensitive source. (Advanced.)

@@ -1,0 +1,114 @@
+version: 1
+generated_at: 2026-07-12T23:44:00.595220+00:00
+organization: Acme Financial (demo)
+system_name: Client-onboarding agent
+frameworks:
+- framework: eu-ai-act
+  answers:
+  - control_id: art_5_prohibited
+    answer: no
+  - control_id: art_9_risk_system
+    answer: yes
+  - control_id: art_9_residual_risk
+    answer: yes
+  - control_id: art_10_data_quality
+    answer: no
+  - control_id: art_10_bias
+    answer: yes
+  - control_id: art_10_special_categories
+    answer: yes
+  - control_id: art_11_annex_iv
+    answer: no
+  - control_id: art_12_logging
+    answer: yes
+  - control_id: art_12_traceability
+    answer: yes
+  - control_id: art_13_transparency
+    answer: yes
+  - control_id: art_14_oversight_design
+    answer: yes
+  - control_id: art_14_intervention
+    answer: partial
+  - control_id: art_14_oversight_effectiveness
+    answer: no
+  - control_id: art_15_accuracy
+    answer: yes
+  - control_id: art_15_robustness_security
+    answer: yes
+  - control_id: art_17_qms
+    answer: yes
+  - control_id: art_26_deployer_use
+    answer: yes
+  - control_id: art_26_deployer_logs
+    answer: no
+  - control_id: art_72_post_market
+    answer: partial
+  - control_id: art_79_incident_reporting
+    answer: no
+- framework: imda
+  answers:
+  - control_id: identity_verifiable
+    answer: yes
+  - control_id: identity_accounted
+    answer: yes
+  - control_id: identity_capacity
+    answer: partial
+  - control_id: identity_delegation
+    answer: no
+  - control_id: identity_catalogued
+    answer: yes
+  - control_id: authz_least_privilege
+    answer: partial
+  - control_id: authz_bounded_by_human
+    answer: yes
+  - control_id: deterministic_limits
+    answer: yes
+  - control_id: blast_radius
+    answer: yes
+  - control_id: approval_checkpoints
+    answer: yes
+  - control_id: approval_context
+    answer: yes
+  - control_id: deny_by_default
+    answer: yes
+  - control_id: track_override_rate
+    answer: partial
+  - control_id: track_response_time
+    answer: yes
+  - control_id: detect_outlier_reviewers
+    answer: yes
+  - control_id: alert_unauthorized
+    answer: partial
+  - control_id: structural_controls
+    answer: yes
+  - control_id: mcp_whitelisting
+    answer: yes
+  - control_id: log_all_interactions
+    answer: yes
+  - control_id: filter_sensitive_mcp
+    answer: yes
+  - control_id: sandbox_execution
+    answer: no
+  - control_id: tamper_proof_audit
+    answer: yes
+  - control_id: runtime_controls
+    answer: no
+  - control_id: continuous_monitoring
+    answer: partial
+  - control_id: change_management
+    answer: yes
+  - control_id: inform_users_actions
+    answer: no
+  - control_id: training_tradecraft
+    answer: no
+  - control_id: track_boundary_crossing
+    answer: yes
+  - control_id: multi_hop_taint
+    answer: no
+evidence:
+  vas: demo/vas-logs.jsonl
+  chain: demo/chain.jsonl
+  chain_hmac_key: file:demo/chain.key
+  approvals: demo/approvals.jsonl
+  credentials: demo/credentials.jsonl
+  jwks: demo/jwks.json

@@ -1,0 +1,60 @@
+[package]
+name = "aperion-compass"
+version = "0.1.0"
+edition = "2021"
+description = "Aperion Compass -- a local, offline AI governance self-assessment. Answer a guided questionnaire, point it at your exported logs, and get a conformance scorecard and report for the EU AI Act and Singapore's IMDA agentic framework. Standalone, free, open source."
+license = "Apache-2.0"
+authors = ["Aperion <support@aperion.ai>"]
+readme = "README.md"
+keywords = ["ai", "governance", "compliance", "eu-ai-act", "audit"]
+categories = ["command-line-utilities", "development-tools"]
+repository = "https://github.com/AperionAI/compass"
+
+# Standalone crate -- intentionally NOT a member of the enterprise smartflow
+# workspace. Compass ships independently with its own release cadence and a
+# lean, offline-only dependency tree (no tokio, no Redis, no HTTP client).
+# The action-risk tierer, the Ed25519 verify path, the audit-chain verifier,
+# and the oversight math are self-contained vendored copies of logic in
+# ../../src/ so an assessment reproduces the same verdicts Smartflow enforces.
+[workspace]
+
+# Hybrid lib+bin. The library exposes the catalog model, scoring, evidence
+# adapters, and report renderers for embedders and integration tests. The
+# binary is the `compass` CLI end-users run.
+[lib]
+name = "aperion_compass"
+path = "src/lib.rs"
+
+[[bin]]
+name = "compass"
+path = "src/main.rs"
+
+[dependencies]
+# Serde stack -- catalogs are YAML, assessments/reports are YAML+JSON, and
+# every evidence file is JSONL or JSON.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+# CLI parsing.
+clap = { version = "4", features = ["derive"] }
+# RFC 3339 timestamps + window math.
+chrono = { version = "0.4", features = ["serde"] }
+# Tamper-evident audit-chain verification (HMAC-SHA256 over canonical JSON).
+sha2 = "0.10"
+hmac = "0.12"
+hex = "0.4"
+base64 = "0.22"
+# Offline Ed25519 credential verification (RFC 8037 OKP / JWKS).
+ed25519-dalek = "2"
+# Error handling.
+anyhow = "1"
+thiserror = "1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true
+codegen-units = 1

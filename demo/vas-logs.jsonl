@@ -1,0 +1,5 @@
+{"request_id":"r1","model":"gpt-4o","provider":"openai","user_id":"alice","aida_principal_id":"alice@bank","action_risk_tier":"T1","tool_name":"read_account","perimeter_classification":"internal","shield_decision":"allow"}
+{"request_id":"r2","model":"claude-3.5","provider":"anthropic","user_id":"bob","aida_principal_id":"bob@bank","action_risk_tier":"T2","tool_name":"update_record","perimeter_classification":"internal","shield_decision":"allow"}
+{"request_id":"r3","model":"gpt-4o","provider":"openai","user_id":"alice","aida_principal_id":"alice@bank","action_risk_tier":"T3","tool_name":"make_payment","perimeter_classification":"external_trusted","shield_decision":"approval","shield_ticket_id":"tk-1001"}
+{"request_id":"r4","model":"gpt-4o","provider":"openai","user_id":"carol","aida_principal_id":"carol@bank","action_risk_tier":"T3","tool_name":"delete_customer","perimeter_classification":"internal","shield_decision":"block"}
+{"request_id":"r5","model":"llama-3","provider":"ollama","user_id":"bob","aida_principal_id":"bob@bank","action_risk_tier":"T1","tool_name":"search_docs","perimeter_classification":"internal","shield_decision":"allow"}
