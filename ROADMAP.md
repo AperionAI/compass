@@ -74,6 +74,27 @@ Catalog work (the content is the product):
 - **NIST AI RMF catalog** (GOVERN / MAP / MEASURE / MANAGE) — the
   planned fast-follow from v0.1.
 
+Getting the evidence in the first place (the biggest v0.1 gap —
+most teams don't have governance-grade logs lying around, and
+telling them "feed us JSONL" isn't a methodology):
+
+- **Evidence playbooks** — per-platform guides in `docs/evidence/`
+  for exporting usable logs from the systems people actually run:
+  OpenAI (stored completions / usage export), Azure OpenAI
+  (diagnostic settings → Log Analytics, query included), AWS Bedrock
+  (model-invocation logging → S3), LiteLLM (file callback), LangSmith
+  run exports, plus a "roll your own" spec listing the minimal fields
+  Compass needs. Copy-paste commands, not prose.
+- **Named ingest adapters** — `compass ingest --from
+  openai|litellm|bedrock|csv` to normalise native export formats into
+  Compass JSONL. The CSV adapter doubles as the approvals bridge:
+  teams tracking approvals in Jira or ServiceNow export a CSV and the
+  human-oversight check lights up.
+- **`compass doctor`** — an evidence gap report: looks at what you've
+  provided, lists which checks can't run, and prints the specific
+  playbook steps to close each gap. If you can't produce a record,
+  that absence is itself a finding.
+
 Evidence + CI:
 
 - **MCP trust-registry check** — ingest an exported server allowlist
@@ -92,6 +113,15 @@ Evidence + CI:
 
 ## v0.3 — crosswalks, trends, and richer evidence
 
+- **`compass record`** — solve the cold-start problem for teams with
+  no logs at all: a localhost pass-through proxy speaking the
+  OpenAI-compatible API. Point your SDK's `base_url` at it and every
+  request and tool call is written as Compass-ready JSONL,
+  hash-chained as it's written so self-collected evidence is
+  tamper-evident too. Local only, no accounts, nothing leaves the
+  machine. Start recording today, assess in two weeks.
+- **Approval-system adapters** — Jira and ServiceNow export
+  converters building on the v0.2 CSV bridge.
 - **Framework crosswalk** — map equivalent controls across EU / IMDA /
   NIST so one answered assessment scores against every catalog
   ("answer once, score everywhere"), with per-framework overrides.
