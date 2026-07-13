@@ -71,6 +71,30 @@ compass serve --port 8787
 No evidence files? A questionnaire-only run still produces a full
 report — those controls are simply marked "self-attested".
 
+### Don't have governance-grade logs? (most people don't)
+
+That's the normal starting point, and it's the whole reason the tool
+exists. Two ways to get real evidence:
+
+```bash
+# Convert something you already have (provider export → evidence)
+compass ingest --from openai   --input openai-export.json
+compass ingest --from litellm  --input litellm-logs.jsonl
+compass ingest --from bedrock  --input bedrock-invocations.jsonl
+compass ingest --from csv-approvals --input approvals.csv   # Jira/ServiceNow export
+
+# Or capture it from live traffic: run this in front of your model
+# endpoint, point your SDK's base_url at it, come back in two weeks.
+compass record --upstream http://localhost:4000 --out compass-record.jsonl
+
+# Then see exactly what's still missing and how to fix each gap
+compass doctor
+```
+
+Step-by-step guides for pulling logs from OpenAI, Azure OpenAI,
+LiteLLM, Bedrock, and LangSmith — plus the minimal field spec if you
+want to roll your own — live in [docs/evidence/](docs/evidence/).
+
 ### Try it on the bundled demo
 
 ```bash
@@ -102,7 +126,9 @@ cargo build --release      # ./target/release/compass
 | Command | What it does |
 |---|---|
 | `compass assess` | Interactive questionnaire → `compass-assessment.yaml` (add `--defaults` to scaffold an editable file). |
-| `compass ingest` | Register evidence files into the assessment for automated checks. |
+| `compass ingest` | Register evidence files; or `--from openai\|litellm\|bedrock\|csv\|csv-approvals --input <export>` to convert a native export into evidence first. |
+| `compass doctor` | Show which automated checks have evidence and, for every gap, the exact step to close it. |
+| `compass record` | Localhost OpenAI-compatible proxy that captures a tamper-evident log from live traffic. |
 | `compass report` | Score answers + evidence; write HTML / Markdown / JSON. |
 | `compass serve` | Live localhost dashboard with a re-scan button. |
 | `compass verify` | Standalone tamper-evident audit-chain verification. |
@@ -159,6 +185,10 @@ Remediation text in reports links to the governance patterns at
 - **HMAC credentials aren't offline-verifiable.** Only Ed25519 (public
   key) credentials can be checked without a secret; HMAC ones are
   reported as "unverifiable", not "valid".
+- **`compass record` forwards to http upstreams.** For a hosted HTTPS
+  API, put a local gateway (e.g. LiteLLM) in front — see
+  [docs/evidence/record.md](docs/evidence/record.md). Direct-HTTPS
+  upstreams and SSE streaming pass-through are on the roadmap.
 - **Not legal advice.** This is a preparation aid, not a conformity
   assessment, and not a substitute for a notified body, counsel, or
   your regulator. The control catalogs are our reading of the

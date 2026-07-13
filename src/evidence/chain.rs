@@ -192,7 +192,10 @@ fn parse_entries(raw: &str) -> anyhow::Result<Vec<serde_json::Value>> {
     Ok(out)
 }
 
-fn canonical_for_hmac(entry: &serde_json::Value) -> String {
+/// Canonicalise an entry for HMAC: drop `entry_hmac`, recursively sort object
+/// keys, serialise compactly. Shared with the recorder so written chains are
+/// byte-compatible with what this verifier expects.
+pub(crate) fn canonical_for_hmac(entry: &serde_json::Value) -> String {
     let mut v = entry.clone();
     if let Some(obj) = v.as_object_mut() {
         obj.remove("entry_hmac");
@@ -214,13 +217,13 @@ fn sort_value(v: &serde_json::Value) -> serde_json::Value {
     }
 }
 
-fn hmac_hex(key: &[u8], msg: &str) -> String {
+pub(crate) fn hmac_hex(key: &[u8], msg: &str) -> String {
     let mut mac = HmacSha256::new_from_slice(key).expect("hmac accepts any key length");
     mac.update(msg.as_bytes());
     hex::encode(mac.finalize().into_bytes())
 }
 
-fn load_key_spec(spec: &str) -> Option<Vec<u8>> {
+pub(crate) fn load_key_spec(spec: &str) -> Option<Vec<u8>> {
     if let Some(rest) = spec.strip_prefix("file:") {
         let bytes = std::fs::read(rest).ok()?;
         // If file contents look like text, try loose decode; else raw bytes.

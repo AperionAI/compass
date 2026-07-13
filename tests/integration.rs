@@ -197,6 +197,135 @@ fn assess_defaults_then_report_roundtrips() {
     assert!(dir.path().join("r").exists() || dir.path().join("r.md").exists());
 }
 
+#[test]
+fn ingest_from_openai_then_report_uses_converted_logs() {
+    let dir = tempfile::tempdir().unwrap();
+    let raw = dir.path().join("openai.jsonl");
+    std::fs::write(
+        &raw,
+        "{\"id\":\"c1\",\"model\":\"gpt-4o\",\"created\":1735689600,\"user\":\"u1\",\
+          \"choices\":[{\"message\":{\"tool_calls\":[{\"function\":{\"name\":\"delete_database\"}}]}}]}\n",
+    )
+    .unwrap();
+    let assessment = dir.path().join("a.yaml");
+    let converted = dir.path().join("logs.jsonl");
+
+    let st = Command::new(BIN)
+        .args([
+            "ingest",
+            "--assessment",
+            assessment.to_str().unwrap(),
+            "--framework",
+            "imda",
+            "--from",
+            "openai",
+            "--input",
+            raw.to_str().unwrap(),
+            "--out",
+            converted.to_str().unwrap(),
+        ])
+        .status()
+        .unwrap();
+    assert!(st.success());
+    assert!(converted.exists(), "converted logs should be written");
+
+    // The converted file is registered as generic evidence and now feeds the
+    // logging-completeness + action-risk checks on report.
+    let card_json = dir.path().join("r.json");
+    let st = Command::new(BIN)
+        .args([
+            "report",
+            "--assessment",
+            assessment.to_str().unwrap(),
+            "--out",
+            card_json.to_str().unwrap(),
+            "--format",
+            "json",
+            "--no-exit-code",
+        ])
+        .status()
+        .unwrap();
+    assert!(st.success());
+    let body = std::fs::read_to_string(&card_json).unwrap();
+    assert!(body.contains("action_risk_coverage"));
+    assert!(body.contains("logging_completeness"));
+}
+
+#[test]
+fn ingest_from_csv_approvals_feeds_oversight() {
+    let dir = tempfile::tempdir().unwrap();
+    let raw = dir.path().join("appr.csv");
+    std::fs::write(
+        &raw,
+        "reviewer,decision,created,decided\n\
+         bob,approve,1735689600,1735689630\n\
+         carol,deny,1735689600,1735689900\n",
+    )
+    .unwrap();
+    let assessment = dir.path().join("a.yaml");
+
+    let st = Command::new(BIN)
+        .args([
+            "ingest",
+            "--assessment",
+            assessment.to_str().unwrap(),
+            "--framework",
+            "imda",
+            "--from",
+            "csv-approvals",
+            "--input",
+            raw.to_str().unwrap(),
+            "--out",
+            dir.path().join("appr.jsonl").to_str().unwrap(),
+        ])
+        .status()
+        .unwrap();
+    assert!(st.success());
+
+    // doctor should now show human_oversight as run (not a gap).
+    let output = Command::new(BIN)
+        .args(["doctor", "--assessment", assessment.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains("human_oversight"), "doctor output: {text}");
+    // The oversight line should not be a GAP now that approvals are present.
+    assert!(
+        text.lines()
+            .any(|l| l.contains("human_oversight") && !l.contains("GAP")),
+        "oversight should have evidence: {text}"
+    );
+}
+
+#[test]
+fn doctor_reports_gaps_on_bare_assessment() {
+    let dir = tempfile::tempdir().unwrap();
+    let assessment = dir.path().join("a.yaml");
+    // Scaffold with no evidence.
+    let st = Command::new(BIN)
+        .args([
+            "assess",
+            "--framework",
+            "eu-ai-act,imda",
+            "--assessment",
+            assessment.to_str().unwrap(),
+            "--defaults",
+        ])
+        .status()
+        .unwrap();
+    assert!(st.success());
+
+    let output = Command::new(BIN)
+        .args(["doctor", "--assessment", assessment.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains("GAP"), "expected gaps: {text}");
+    assert!(text.contains("playbook:"));
+}
+
 fn tmp_out() -> String {
     let mut f = tempfile::NamedTempFile::new().unwrap();
     // Ensure a .json suffix so single-format honours the path as-is.

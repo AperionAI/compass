@@ -78,22 +78,19 @@ Getting the evidence in the first place (the biggest v0.1 gap —
 most teams don't have governance-grade logs lying around, and
 telling them "feed us JSONL" isn't a methodology):
 
-- **Evidence playbooks** — per-platform guides in `docs/evidence/`
-  for exporting usable logs from the systems people actually run:
-  OpenAI (stored completions / usage export), Azure OpenAI
-  (diagnostic settings → Log Analytics, query included), AWS Bedrock
-  (model-invocation logging → S3), LiteLLM (file callback), LangSmith
-  run exports, plus a "roll your own" spec listing the minimal fields
-  Compass needs. Copy-paste commands, not prose.
-- **Named ingest adapters** — `compass ingest --from
-  openai|litellm|bedrock|csv` to normalise native export formats into
-  Compass JSONL. The CSV adapter doubles as the approvals bridge:
-  teams tracking approvals in Jira or ServiceNow export a CSV and the
+- **[SHIPPED v0.2] Evidence playbooks** — per-platform guides in
+  `docs/evidence/` for exporting usable logs from the systems people
+  actually run: OpenAI, Azure OpenAI (Log Analytics query included),
+  AWS Bedrock (model-invocation logging → S3), LiteLLM, LangSmith,
+  plus a "roll your own" minimal field spec. Copy-paste commands.
+- **[SHIPPED v0.2] Named ingest adapters** — `compass ingest --from
+  openai|litellm|bedrock|csv|csv-approvals --input <export>`
+  normalises native formats into Compass JSONL. The csv-approvals
+  adapter is the Jira/ServiceNow bridge: export a CSV and the
   human-oversight check lights up.
-- **`compass doctor`** — an evidence gap report: looks at what you've
-  provided, lists which checks can't run, and prints the specific
-  playbook steps to close each gap. If you can't produce a record,
-  that absence is itself a finding.
+- **[SHIPPED v0.2] `compass doctor`** — evidence gap report: which
+  checks have evidence, and for every gap the exact remediation step +
+  playbook link. Gaps are findings, not failures.
 
 Evidence + CI:
 
@@ -113,14 +110,14 @@ Evidence + CI:
 
 ## v0.3 — crosswalks, trends, and richer evidence
 
-- **`compass record`** — solve the cold-start problem for teams with
-  no logs at all: a localhost pass-through proxy speaking the
+- **[SHIPPED v0.2] `compass record`** — solves the cold-start problem
+  for teams with no logs: a std-only localhost proxy speaking the
   OpenAI-compatible API. Point your SDK's `base_url` at it and every
-  request and tool call is written as Compass-ready JSONL,
-  hash-chained as it's written so self-collected evidence is
-  tamper-evident too. Local only, no accounts, nothing leaves the
-  machine. Start recording today, assess in two weeks.
-- **Approval-system adapters** — Jira and ServiceNow export
+  call is written as hash-chained, Compass-ready JSONL that doubles as
+  the audit chain and the request log. Local only, nothing leaves the
+  machine. (Follow-ups: direct-HTTPS upstreams and SSE streaming
+  pass-through; today it forwards to http upstreams.)
+- **Approval-system adapters** — deeper Jira and ServiceNow export
   converters building on the v0.2 CSV bridge.
 - **Framework crosswalk** — map equivalent controls across EU / IMDA /
   NIST so one answered assessment scores against every catalog

@@ -10,9 +10,12 @@
 //! Everything runs offline. No telemetry, no network.
 
 use anyhow::{anyhow, Context, Result};
+use aperion_compass::adapters::{Adapter, OutputKind};
 use aperion_compass::catalog::{self, BUNDLED_FRAMEWORKS};
+use aperion_compass::doctor;
 use aperion_compass::evidence::{self, CheckStatus, EvidenceBundle};
 use aperion_compass::questionnaire::{self, Assessment, EvidencePaths, DEFAULT_ASSESSMENT_PATH};
+use aperion_compass::record::{self, RecordConfig};
 use aperion_compass::report::{self, Format};
 use aperion_compass::scoring::{self, Scorecard, DEFAULT_PASS_THRESHOLD};
 use clap::{Args, Parser, Subcommand};
@@ -34,7 +37,13 @@ enum Command {
     /// Run the interactive questionnaire and write the assessment file.
     Assess(AssessArgs),
     /// Register evidence files into an assessment for automated checks.
+    /// With `--from`, first convert a native export (OpenAI/LiteLLM/Bedrock/CSV)
+    /// into canonical evidence, then register it.
     Ingest(IngestArgs),
+    /// Report which automated checks have evidence and how to close the gaps.
+    Doctor(DoctorArgs),
+    /// Capture tamper-evident evidence from live traffic (recording proxy).
+    Record(RecordArgs),
     /// Score the assessment and render a report (HTML / Markdown / JSON).
     Report(ReportArgs),
     /// Serve a live local dashboard that re-scans on demand.
@@ -120,8 +129,48 @@ struct IngestArgs {
     /// If the assessment file does not exist, scaffold it for these frameworks.
     #[arg(long)]
     framework: Option<String>,
+    /// Convert a native export before registering: openai | litellm | bedrock |
+    /// csv | csv-approvals. Requires --input.
+    #[arg(long)]
+    from: Option<String>,
+    /// Path to the native export to convert (used with --from).
+    #[arg(long)]
+    input: Option<String>,
+    /// Where to write the converted canonical JSONL (used with --from;
+    /// defaults to compass-logs.jsonl / compass-approvals.jsonl).
+    #[arg(long)]
+    out: Option<String>,
     #[command(flatten)]
     evidence: EvidenceArgs,
+}
+
+#[derive(Debug, Args)]
+struct DoctorArgs {
+    /// Assessment file to diagnose.
+    #[arg(long, default_value = DEFAULT_ASSESSMENT_PATH)]
+    assessment: String,
+    /// Override the frameworks to diagnose (defaults to those in the assessment).
+    #[arg(long)]
+    framework: Option<String>,
+    #[command(flatten)]
+    evidence: EvidenceArgs,
+}
+
+#[derive(Debug, Args)]
+struct RecordArgs {
+    /// Upstream base URL to forward to (http only), e.g. http://localhost:4000.
+    #[arg(long)]
+    upstream: String,
+    /// Local port to listen on.
+    #[arg(long, default_value_t = 8788)]
+    port: u16,
+    /// Output JSONL path (serves as both the audit chain and the request log).
+    #[arg(long, default_value = "compass-record.jsonl")]
+    out: String,
+    /// HMAC key spec: file:<path> | base64:<v> | hex:<v> | env:<NAME>. When
+    /// omitted, a key is generated and written to <out>.key.
+    #[arg(long)]
+    hmac_key: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -194,6 +243,8 @@ fn run(cli: Cli) -> Result<i32> {
     match cli.command {
         Command::Assess(a) => cmd_assess(a),
         Command::Ingest(a) => cmd_ingest(a),
+        Command::Doctor(a) => cmd_doctor(a),
+        Command::Record(a) => cmd_record(a),
         Command::Report(a) => cmd_report(a),
         Command::Serve(a) => cmd_serve(a),
         Command::Verify(a) => cmd_verify(a),
@@ -248,23 +299,73 @@ fn cmd_assess(a: AssessArgs) -> Result<i32> {
     Ok(0)
 }
 
+/// Convert a native export via an adapter, write canonical JSONL, and return
+/// the (path, kind) to register.
+fn run_adapter(
+    from: &str,
+    input: &Option<String>,
+    out: &Option<String>,
+) -> Result<(String, OutputKind)> {
+    let adapter = Adapter::parse(from).ok_or_else(|| {
+        anyhow!(
+            "unknown --from '{from}'. Supported: {}",
+            Adapter::known().join(", ")
+        )
+    })?;
+    let input = input
+        .as_deref()
+        .ok_or_else(|| anyhow!("--from requires --input <native export file>"))?;
+    let raw = std::fs::read_to_string(input).with_context(|| format!("reading {input}"))?;
+    let records = adapter
+        .convert(&raw)
+        .with_context(|| format!("converting {input} with adapter '{from}'"))?;
+
+    let out_path = out
+        .clone()
+        .unwrap_or_else(|| adapter.default_out().to_string());
+    let mut buf = String::new();
+    for r in &records {
+        buf.push_str(&serde_json::to_string(r)?);
+        buf.push('\n');
+    }
+    std::fs::write(&out_path, buf).with_context(|| format!("writing {out_path}"))?;
+    println!(
+        "Converted {} record(s) from {input} → {out_path}",
+        records.len()
+    );
+    Ok((out_path, adapter.output_kind()))
+}
+
 fn cmd_ingest(a: IngestArgs) -> Result<i32> {
+    // Optional conversion step: --from <adapter> --input <file>.
+    let converted: Option<(String, OutputKind)> = if a.from.is_some() {
+        Some(run_adapter(a.from.as_deref().unwrap(), &a.input, &a.out)?)
+    } else {
+        None
+    };
+
     let mut assessment = if std::path::Path::new(&a.assessment).exists() {
         Assessment::from_path(&a.assessment)?
-    } else {
-        let tokens = a
-            .framework
-            .as_deref()
-            .map(parse_framework_tokens)
-            .ok_or_else(|| {
-                anyhow!(
-                    "assessment file {} not found; pass --framework to scaffold one, or run `compass assess` first",
-                    a.assessment
-                )
-            })?;
+    } else if a.framework.is_some() || converted.is_some() {
+        // Scaffold on the fly: explicit --framework, or default set when the
+        // user is just converting evidence for a brand-new assessment.
+        let tokens = parse_framework_tokens(a.framework.as_deref().unwrap_or("eu-ai-act,imda"));
         let catalogs = catalog::load_selection(&tokens)?;
         Assessment::scaffold(&catalogs)
+    } else {
+        return Err(anyhow!(
+            "assessment file {} not found; pass --framework to scaffold one, or run `compass assess` first",
+            a.assessment
+        ));
     };
+
+    // Register a converted export into the appropriate evidence slot.
+    if let Some((path, kind)) = &converted {
+        match kind {
+            OutputKind::Logs => assessment.evidence.generic = Some(path.clone()),
+            OutputKind::Approvals => assessment.evidence.approvals = Some(path.clone()),
+        }
+    }
 
     a.evidence.merge_into(&mut assessment.evidence);
     assessment.save(&a.assessment)?;
@@ -288,6 +389,41 @@ fn cmd_ingest(a: IngestArgs) -> Result<i32> {
         }
         println!("Run `compass report` to score with these checks.");
     }
+    if converted.is_some() {
+        println!("Next: `compass doctor` to see remaining gaps, or `compass report` to score.");
+    }
+    Ok(0)
+}
+
+fn cmd_doctor(a: DoctorArgs) -> Result<i32> {
+    let assessment = Assessment::from_path(&a.assessment).with_context(|| {
+        format!(
+            "load assessment (run `compass assess` first?) {}",
+            a.assessment
+        )
+    })?;
+    let catalogs = catalogs_for(&assessment, &a.framework)?;
+
+    let mut paths = assessment.evidence.clone();
+    a.evidence.merge_into(&mut paths);
+    let bundle = if paths.is_empty() {
+        EvidenceBundle::default()
+    } else {
+        evidence::run_all(&paths)
+    };
+
+    let diag = doctor::diagnose(&catalogs, &paths, &bundle);
+    print!("{}", doctor::render_text(&diag));
+    Ok(0)
+}
+
+fn cmd_record(a: RecordArgs) -> Result<i32> {
+    record::run(RecordConfig {
+        port: a.port,
+        upstream: a.upstream,
+        out: a.out,
+        hmac_key: a.hmac_key,
+    })?;
     Ok(0)
 }
 
