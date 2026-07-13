@@ -8,7 +8,10 @@
 # offline by design; the container makes no network calls.
 
 # ─── Build stage ───────────────────────────────────────────────────────
-FROM rust:1.83-slim-bookworm AS build
+# Pin to a Rust release that supports edition 2024 (>= 1.85). Transitive
+# deps (e.g. base64ct 1.8+) require it; older images fail the
+# dependency-cache layer with "edition2024 is required".
+FROM rust:1.95-slim-bookworm AS build
 
 WORKDIR /src
 
