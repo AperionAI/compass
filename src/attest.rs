@@ -106,9 +106,9 @@ pub fn verify(bundle: &Value, jwks_path: &str) -> Result<VerifyReport> {
     // different key than the one we verified against.
     let expected_keyid = keyid_for(&vk);
     let keyid_note = match &keyid {
-        Some(k) if *k != expected_keyid => format!(
-            " (note: bundle keyid {k} != provided key {expected_keyid})"
-        ),
+        Some(k) if *k != expected_keyid => {
+            format!(" (note: bundle keyid {k} != provided key {expected_keyid})")
+        }
         _ => String::new(),
     };
 
@@ -420,7 +420,9 @@ fn key_from_b64url(s: &str) -> Option<VerifyingKey> {
 }
 
 fn key_from_b64std(s: &str) -> Option<VerifyingKey> {
-    let bytes = base64::engine::general_purpose::STANDARD.decode(s.trim()).ok()?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(s.trim())
+        .ok()?;
     key_from_bytes(&bytes)
 }
 
