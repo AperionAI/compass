@@ -66,10 +66,33 @@ compass report --out report.html --format html,md,json
 
 # ...or explore live in the browser
 compass serve --port 8787
+
+# 4. (v0.3) Seal the result into a signed, offline-verifiable attestation
+compass attest generate --out compass-attestation.json
+compass attest verify   --bundle compass-attestation.json   # anyone, offline
 ```
 
 No evidence files? A questionnaire-only run still produces a full
 report — those controls are simply marked "self-attested".
+
+### Signed attestation bundles (v0.3)
+
+A report is something you produce; an **attestation** is something an
+auditor or customer can *verify without trusting you*. `compass attest
+generate` assembles the scored posture, every evidence-check outcome, and a
+cryptographic anchor of your audit-chain tail into one JSON payload and
+Ed25519-signs it. `compass attest verify` recomputes the canonical payload
+and checks the signature **offline** against a published public key / JWKS —
+so any tampering (a nudged score, a removed integrity failure, a swapped
+framework) breaks verification with a non-zero exit code.
+
+The signing key defaults to a stable per-user key at
+`~/.aperion-compass/attest-ed25519.key` (created on first run), or pass your
+own with `--signing-key file:…|base64:…|hex:…|env:…` — e.g. reuse the same
+Ed25519 issuer key you already publish for AIDA agent credentials.
+`generate` also writes the public key as `<out>.jwks.json` so a verifier
+needs nothing but the bundle and that key. It reuses the exact Ed25519/JWKS
+primitive Compass already uses to verify agent credentials.
 
 ### Don't have governance-grade logs? (most people don't)
 

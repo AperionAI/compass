@@ -19,9 +19,12 @@
 //!   to gather it.
 //! - [`record`] — a std-only OpenAI-compatible recording proxy that captures
 //!   tamper-evident evidence from live traffic.
+//! - [`attest`] — assemble + Ed25519-sign an offline-verifiable attestation
+//!   bundle (posture + evidence + audit-chain anchor), and verify one.
 
 pub mod action_risk;
 pub mod adapters;
+pub mod attest;
 pub mod catalog;
 pub mod doctor;
 pub mod evidence;

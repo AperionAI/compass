@@ -1,6 +1,6 @@
 [package]
 name = "aperion-compass"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Aperion Compass -- a local, offline AI governance self-assessment. Answer a guided questionnaire, point it at your exported logs, and get a conformance scorecard and report for the EU AI Act and Singapore's IMDA agentic framework. Standalone, free, open source."
 license = "Apache-2.0"

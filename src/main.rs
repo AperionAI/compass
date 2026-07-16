@@ -50,8 +50,62 @@ enum Command {
     Serve(ServeArgs),
     /// Independently verify a tamper-evident audit-chain export.
     Verify(VerifyArgs),
+    /// Generate or verify a signed, offline-verifiable attestation bundle.
+    #[command(subcommand)]
+    Attest(AttestCommand),
     /// List the governance frameworks bundled into this binary.
     Frameworks,
+}
+
+/// `compass attest ...` — signed attestation bundles.
+#[derive(Debug, Subcommand)]
+// clap requires the args structs inline (Box breaks the derive); the size
+// skew between generate/verify is irrelevant for a one-shot CLI dispatch.
+#[allow(clippy::large_enum_variant)]
+enum AttestCommand {
+    /// Assemble the scored posture + evidence + audit-chain anchor and
+    /// Ed25519-sign it into a self-contained, offline-verifiable bundle.
+    Generate(AttestGenerateArgs),
+    /// Verify a signed attestation bundle offline against a public key / JWKS.
+    Verify(AttestVerifyArgs),
+}
+
+#[derive(Debug, Args)]
+struct AttestGenerateArgs {
+    /// Assessment file to score.
+    #[arg(long, default_value = DEFAULT_ASSESSMENT_PATH)]
+    assessment: String,
+    /// Override the frameworks to score.
+    #[arg(long)]
+    framework: Option<String>,
+    /// Pass threshold (0-100).
+    #[arg(long, default_value_t = DEFAULT_PASS_THRESHOLD)]
+    threshold: f64,
+    #[command(flatten)]
+    evidence: EvidenceArgs,
+    /// Ed25519 signing key (32-byte seed): file:<path> | base64:<v> | hex:<v>
+    /// | env:<NAME>. If omitted, a stable per-user key at
+    /// ~/.aperion-compass/attest-ed25519.key is created on first run and reused.
+    #[arg(long)]
+    signing_key: Option<String>,
+    /// Output path for the signed bundle.
+    #[arg(long, default_value = "compass-attestation.json")]
+    out: String,
+    /// Output path for the public-key JWKS a verifier will use. Defaults to
+    /// `<out>.jwks.json`.
+    #[arg(long)]
+    jwks_out: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct AttestVerifyArgs {
+    /// Signed attestation bundle to verify.
+    #[arg(long)]
+    bundle: String,
+    /// Public key / JWKS file to verify against. Defaults to
+    /// `<bundle>.jwks.json` when present.
+    #[arg(long)]
+    jwks: Option<String>,
 }
 
 /// Evidence-file flags, shared by `ingest` and `report`.
@@ -248,6 +302,7 @@ fn run(cli: Cli) -> Result<i32> {
         Command::Report(a) => cmd_report(a),
         Command::Serve(a) => cmd_serve(a),
         Command::Verify(a) => cmd_verify(a),
+        Command::Attest(a) => cmd_attest(a),
         Command::Frameworks => {
             println!("Bundled frameworks:");
             for (id, aliases) in BUNDLED_FRAMEWORKS {
@@ -587,4 +642,87 @@ fn cmd_verify(a: VerifyArgs) -> Result<i32> {
         CheckStatus::Fail => 1,
         CheckStatus::NotRun => 2,
     })
+}
+
+fn cmd_attest(cmd: AttestCommand) -> Result<i32> {
+    match cmd {
+        AttestCommand::Generate(a) => cmd_attest_generate(a),
+        AttestCommand::Verify(a) => cmd_attest_verify(a),
+    }
+}
+
+fn cmd_attest_generate(a: AttestGenerateArgs) -> Result<i32> {
+    let assessment = Assessment::from_path(&a.assessment).with_context(|| {
+        format!(
+            "load assessment (run `compass assess` first?) {}",
+            a.assessment
+        )
+    })?;
+
+    let (_cats, card) = build_scorecard(&assessment, &a.framework, &a.evidence, a.threshold)?;
+
+    // The chain path (for the tail anchor) is whatever the assessment / CLI
+    // resolved to for the audit-chain evidence.
+    let mut paths = assessment.evidence.clone();
+    a.evidence.merge_into(&mut paths);
+    let chain_path = paths.chain.clone();
+
+    let (envelope, keyid, jwks) =
+        aperion_compass::attest::generate(&card, chain_path.as_deref(), a.signing_key.as_deref())?;
+
+    std::fs::write(&a.out, serde_json::to_string_pretty(&envelope)?)
+        .with_context(|| format!("writing {}", a.out))?;
+    let jwks_path = a.jwks_out.unwrap_or_else(|| format!("{}.jwks.json", a.out));
+    std::fs::write(&jwks_path, serde_json::to_string_pretty(&jwks)?)
+        .with_context(|| format!("writing {jwks_path}"))?;
+
+    println!("Wrote signed attestation → {}", a.out);
+    println!("Wrote verifier JWKS       → {jwks_path}");
+    println!("Signing key id            → {keyid}");
+    println!();
+    println!(
+        "Verify anywhere, offline:\n  compass attest verify --bundle {} --jwks {jwks_path}",
+        a.out
+    );
+    Ok(0)
+}
+
+fn cmd_attest_verify(a: AttestVerifyArgs) -> Result<i32> {
+    let raw = std::fs::read_to_string(&a.bundle)
+        .with_context(|| format!("reading bundle {}", a.bundle))?;
+    let bundle: serde_json::Value =
+        serde_json::from_str(&raw).with_context(|| format!("parsing bundle {}", a.bundle))?;
+
+    let jwks_path = match a.jwks {
+        Some(p) => p,
+        None => {
+            let default = format!("{}.jwks.json", a.bundle);
+            if std::path::Path::new(&default).exists() {
+                default
+            } else {
+                return Err(anyhow!(
+                    "no --jwks given and {default} not found; pass the verifier's public key"
+                ));
+            }
+        }
+    };
+
+    let report = aperion_compass::attest::verify(&bundle, &jwks_path)?;
+    println!("{}", report.summary);
+    if let Some(v) = report.attestation_version {
+        println!("  attestation_version : {v}");
+    }
+    if let Some(t) = &report.tool_version {
+        println!("  tool_version        : {t}");
+    }
+    if let Some(g) = &report.generated_at {
+        println!("  generated_at        : {g}");
+    }
+    if let (Some(s), Some(l)) = (report.overall_score, &report.overall_label) {
+        println!("  posture             : {} / 100 ({l})", s.round() as i64);
+    }
+    if let Some(f) = report.integrity_failure {
+        println!("  integrity_failure   : {f}");
+    }
+    Ok(if report.valid { 0 } else { 1 })
 }
