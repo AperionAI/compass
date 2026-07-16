@@ -35,6 +35,10 @@ at files you already have:
   against a public key / JWKS (no shared secret, no running gateway).
 - **Logging completeness** — field-presence stats over your request
   logs (identity, risk tier, decisions, perimeter).
+- **Signed attestation (v0.3)** — seal the scored posture, evidence-check
+  outcomes, and an anchor of the audit-chain tail into one Ed25519-signed
+  bundle that an auditor or customer can verify **offline**, without
+  trusting you or touching your gateway.
 
 Objective evidence **overrides** a green self-attestation: claim an
 Article 12 tamper-evident log, hand Compass a chain that fails
