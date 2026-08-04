@@ -205,7 +205,7 @@ jobs:
             desc "Local, offline AI governance self-assessment (EU AI Act & IMDA agentic)"
             homepage "https://github.com/AperionAI/compass"
             version "${VERSION}"
-            license "Apache-2.0"
+            license :cannot_represent
 
             on_macos do
               on_arm do

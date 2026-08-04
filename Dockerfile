@@ -40,7 +40,7 @@ FROM gcr.io/distroless/cc-debian12:nonroot AS runtime
 LABEL org.opencontainers.image.title="aperion-compass"
 LABEL org.opencontainers.image.description="Local, offline AI governance self-assessment (EU AI Act & IMDA agentic)"
 LABEL org.opencontainers.image.source="https://github.com/AperionAI/compass"
-LABEL org.opencontainers.image.licenses="Apache-2.0"
+LABEL org.opencontainers.image.licenses="NOASSERTION"
 LABEL org.opencontainers.image.vendor="Aperion"
 
 COPY --from=build /src/target/release/compass /usr/local/bin/compass

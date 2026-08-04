@@ -1,6 +1,6 @@
 # aperion-compass — local, offline AI governance self-assessment
 
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![License: Proprietary](https://img.shields.io/badge/License-Proprietary-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io%2Faperionai%2Fcompass-2496ed.svg)](https://github.com/AperionAI/compass/pkgs/container/compass)
 [![Security policy](https://img.shields.io/badge/security-SECURITY.md-red.svg)](SECURITY.md)
@@ -188,7 +188,7 @@ concepts, same evidence formats — one measures, the other enforces.
 
 | | **aperion-compass** (this) | **Smartflow** |
 |---|---|---|
-| Cost | Free, open source (Apache-2.0) | Commercial |
+| Cost | Free tier, binary-only | Commercial |
 | Runs | Locally, offline, from files | In your request path (gateway) |
 | Mode | Point-in-time snapshot | Continuous, live |
 | Identity | Verifies exported credentials | Issues + validates on the hot path |
@@ -239,4 +239,5 @@ dashboard).
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE).
+Proprietary — binaries and images only, no source distributed. See
+[LICENSE](LICENSE) (Aperion AI Compass Binary License Agreement).
