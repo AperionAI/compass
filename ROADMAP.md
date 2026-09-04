@@ -90,8 +90,6 @@ Install:
 
 ## v0.6 — next
 
-Longer candidate list with effort estimates: [docs/v0.6-ideas.md](docs/v0.6-ideas.md).
-
 - **NIST AI RMF catalog** (GOVERN / MAP / MEASURE / MANAGE).
 - **MCP trust-registry check** — ingest an exported server allowlist.
 - **Emergency-stop evidence** — recognise kill-switch events in the chain.

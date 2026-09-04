@@ -2,3 +2,6 @@
 *.tmp
 compass-report.*
 demo/report.*
+
+# Local planning notes — do not publish
+docs/v0.6-ideas.md
