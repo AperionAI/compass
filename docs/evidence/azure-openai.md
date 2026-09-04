@@ -35,7 +35,7 @@ versions). The goal is an array of objects with `id`, `model`, `user`,
 ## 3. Convert + register
 
 ```bash
-compass ingest --from openai --input azure-export.json
+compass ingest --from azure-openai --input azure-export.json
 compass doctor
 ```
 

@@ -39,9 +39,13 @@ The output already matches Compass's canonical field names, so register it
 directly (no adapter needed):
 
 ```bash
-compass ingest --generic langsmith-runs.jsonl
+compass ingest --from langsmith --input langsmith-runs.jsonl
 compass doctor
 ```
+
+If the file is already in Compass's canonical field names, `--generic` still
+works. The `langsmith` adapter also reads native SDK run objects (`id`,
+`run_type`, `extra.metadata.ls_model_name`, …).
 
 If you'd rather export a table, write a CSV with columns like
 `request_id, model, provider, user_id, tool, timestamp` and use

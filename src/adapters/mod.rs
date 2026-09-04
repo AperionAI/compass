@@ -26,6 +26,14 @@ pub enum Adapter {
     LiteLlm,
     /// AWS Bedrock model-invocation logging records.
     Bedrock,
+    /// Azure OpenAI diagnostic / Log Analytics export (OpenAI shape + Azure keys).
+    AzureOpenai,
+    /// LangSmith run export (SDK `list_runs` objects or already-projected JSONL).
+    Langsmith,
+    /// Anthropic Messages API objects (`/v1/messages`).
+    Anthropic,
+    /// Google Vertex AI / Gemini generateContent logs.
+    Vertex,
     /// Generic request-log CSV (header row mapped by column name).
     Csv,
     /// Approval / review CSV → oversight tickets.
@@ -48,6 +56,10 @@ impl Adapter {
             ref t if t == "openai" => Some(Adapter::Openai),
             ref t if t == "litellm" => Some(Adapter::LiteLlm),
             ref t if t == "bedrock" || t == "awsbedrock" => Some(Adapter::Bedrock),
+            ref t if t == "azureopenai" || t == "azure" => Some(Adapter::AzureOpenai),
+            ref t if t == "langsmith" || t == "langchain" => Some(Adapter::Langsmith),
+            ref t if t == "anthropic" || t == "claude" => Some(Adapter::Anthropic),
+            ref t if t == "vertex" || t == "vertexai" || t == "gemini" => Some(Adapter::Vertex),
             ref t if t == "csv" || t == "csvlogs" => Some(Adapter::Csv),
             ref t if t == "csvapprovals" || t == "approvalscsv" => Some(Adapter::CsvApprovals),
             _ => None,
@@ -56,7 +68,17 @@ impl Adapter {
 
     /// Every accepted token, for help text.
     pub fn known() -> &'static [&'static str] {
-        &["openai", "litellm", "bedrock", "csv", "csv-approvals"]
+        &[
+            "openai",
+            "litellm",
+            "bedrock",
+            "azure-openai",
+            "langsmith",
+            "anthropic",
+            "vertex",
+            "csv",
+            "csv-approvals",
+        ]
     }
 
     pub fn output_kind(&self) -> OutputKind {
@@ -80,6 +102,10 @@ impl Adapter {
             Adapter::Openai => convert_json(raw, openai_record),
             Adapter::LiteLlm => convert_json(raw, litellm_record),
             Adapter::Bedrock => convert_json(raw, bedrock_record),
+            Adapter::AzureOpenai => convert_json(raw, azure_openai_record),
+            Adapter::Langsmith => convert_json(raw, langsmith_record),
+            Adapter::Anthropic => convert_json(raw, anthropic_record),
+            Adapter::Vertex => convert_json(raw, vertex_record),
             Adapter::Csv => csv::convert_logs(raw),
             Adapter::CsvApprovals => csv::convert_approvals(raw),
         }
@@ -322,6 +348,249 @@ fn bedrock_record(v: &Value) -> Vec<Value> {
     }
 }
 
+fn azure_openai_record(v: &Value) -> Vec<Value> {
+    let mut lifted = v.clone();
+    if let Some(obj) = lifted.as_object_mut() {
+        if obj.get("id").is_none() {
+            if let Some(id) = dig_str(
+                v,
+                &[
+                    "CorrelationId",
+                    "correlationId",
+                    "properties.requestId",
+                    "id",
+                ],
+            ) {
+                obj.insert("id".into(), Value::String(id));
+            }
+        }
+        if obj.get("model").is_none() {
+            if let Some(m) = dig_str(
+                v,
+                &[
+                    "properties_modelDeploymentName_s",
+                    "properties.modelDeploymentName",
+                    "modelDeploymentName",
+                    "model",
+                ],
+            ) {
+                obj.insert("model".into(), Value::String(m));
+            }
+        }
+        if obj.get("user").is_none() {
+            if let Some(u) = dig_str(v, &["properties_user_s", "properties.user", "user"]) {
+                obj.insert("user".into(), Value::String(u));
+            }
+        }
+        if obj.get("created").is_none() {
+            if let Some(ts) = v.get("TimeGenerated").or_else(|| v.get("timeGenerated")) {
+                obj.insert("created".into(), ts.clone());
+            }
+        }
+        if obj.get("choices").is_none() {
+            if let Some(choices) = v
+                .get("properties_response_s")
+                .or_else(|| v.pointer("/properties/response"))
+            {
+                if let Some(s) = choices.as_str() {
+                    if let Ok(parsed) = serde_json::from_str::<Value>(s) {
+                        if let Some(c) = parsed.get("choices") {
+                            obj.insert("choices".into(), c.clone());
+                        }
+                    }
+                } else if let Some(c) = choices.get("choices") {
+                    obj.insert("choices".into(), c.clone());
+                }
+            }
+        }
+    }
+    let mut out = openai_record(&lifted);
+    for rec in &mut out {
+        if let Some(o) = rec.as_object_mut() {
+            o.insert("provider".into(), Value::String("azure".into()));
+        }
+    }
+    out
+}
+
+fn langsmith_record(v: &Value) -> Vec<Value> {
+    let request_id = dig_str(v, &["id", "run_id", "request_id"]);
+    let model = dig_str(
+        v,
+        &[
+            "extra.metadata.ls_model_name",
+            "extra.metadata.model",
+            "serialized.kwargs.model",
+            "model",
+        ],
+    );
+    let provider = dig_str(v, &["extra.metadata.ls_provider", "provider"])
+        .unwrap_or_else(|| "langsmith".to_string());
+    let user_id = dig_str(
+        v,
+        &["extra.metadata.user_id", "extra.metadata.user", "user_id"],
+    );
+    let ts = v
+        .get("start_time")
+        .or_else(|| v.get("startTime"))
+        .and_then(ts_to_rfc3339);
+
+    let mut tools = Vec::new();
+    if v.get("run_type").and_then(|x| x.as_str()) == Some("tool") {
+        if let Some(n) = dig_str(v, &["name"]) {
+            tools.push(n);
+        }
+    }
+    collect_named_tools(v, &mut tools);
+
+    let base = |tool: Option<String>| -> Value {
+        let mut o = Map::new();
+        set_str(&mut o, "request_id", request_id.clone());
+        set_str(&mut o, "model", model.clone());
+        o.insert("provider".into(), Value::String(provider.clone()));
+        set_str(&mut o, "user_id", user_id.clone());
+        set_str(&mut o, "timestamp", ts.clone());
+        set_str(&mut o, "tool_name", tool);
+        Value::Object(o)
+    };
+    if tools.is_empty() {
+        vec![base(None)]
+    } else {
+        tools.into_iter().map(|t| base(Some(t))).collect()
+    }
+}
+
+fn anthropic_record(v: &Value) -> Vec<Value> {
+    let request_id = dig_str(v, &["id", "request_id"]);
+    let model = dig_str(v, &["model"]);
+    let user_id = dig_str(v, &["metadata.user_id", "user_id", "user"]);
+    let ts = v
+        .get("created_at")
+        .or_else(|| v.get("timestamp"))
+        .and_then(ts_to_rfc3339);
+    let mut tools = Vec::new();
+    collect_anthropic_tools(v, &mut tools);
+
+    let base = |tool: Option<String>| -> Value {
+        let mut o = Map::new();
+        set_str(&mut o, "request_id", request_id.clone());
+        set_str(&mut o, "model", model.clone());
+        o.insert("provider".into(), Value::String("anthropic".into()));
+        set_str(&mut o, "user_id", user_id.clone());
+        set_str(&mut o, "timestamp", ts.clone());
+        set_str(&mut o, "tool_name", tool);
+        Value::Object(o)
+    };
+    if tools.is_empty() {
+        vec![base(None)]
+    } else {
+        tools.into_iter().map(|t| base(Some(t))).collect()
+    }
+}
+
+fn vertex_record(v: &Value) -> Vec<Value> {
+    let request_id = dig_str(v, &["requestId", "request_id", "name", "id"]);
+    let model = dig_str(v, &["model", "modelVersion", "model_id"]);
+    let user_id = dig_str(v, &["user", "user_id", "identity.principalEmail"]);
+    let ts = v
+        .get("timestamp")
+        .or_else(|| v.get("time"))
+        .and_then(ts_to_rfc3339);
+    let mut tools = Vec::new();
+    collect_vertex_tools(v, &mut tools);
+
+    let base = |tool: Option<String>| -> Value {
+        let mut o = Map::new();
+        set_str(&mut o, "request_id", request_id.clone());
+        set_str(&mut o, "model", model.clone());
+        o.insert("provider".into(), Value::String("vertex".into()));
+        set_str(&mut o, "user_id", user_id.clone());
+        set_str(&mut o, "timestamp", ts.clone());
+        set_str(&mut o, "tool_name", tool);
+        Value::Object(o)
+    };
+    if tools.is_empty() {
+        vec![base(None)]
+    } else {
+        tools.into_iter().map(|t| base(Some(t))).collect()
+    }
+}
+
+fn collect_named_tools(v: &Value, out: &mut Vec<String>) {
+    match v {
+        Value::Object(m) => {
+            if let Some(name) = m.get("name").and_then(|n| n.as_str()) {
+                if m.get("run_type").and_then(|x| x.as_str()) == Some("tool") && !name.is_empty() {
+                    out.push(name.to_string());
+                }
+            }
+            if let Some(name) = m
+                .get("function")
+                .and_then(|f| f.get("name"))
+                .and_then(|n| n.as_str())
+            {
+                out.push(name.to_string());
+            }
+            for val in m.values() {
+                collect_named_tools(val, out);
+            }
+        }
+        Value::Array(a) => {
+            for val in a {
+                collect_named_tools(val, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_anthropic_tools(v: &Value, out: &mut Vec<String>) {
+    if let Some(blocks) = v.get("content").and_then(|c| c.as_array()) {
+        for b in blocks {
+            if b.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
+                if let Some(name) = b.get("name").and_then(|n| n.as_str()) {
+                    if !name.is_empty() {
+                        out.push(name.to_string());
+                    }
+                }
+            }
+        }
+    }
+    if let Some(block) = v.get("content_block") {
+        collect_anthropic_tools(block, out);
+    }
+}
+
+fn collect_vertex_tools(v: &Value, out: &mut Vec<String>) {
+    match v {
+        Value::Object(m) => {
+            if let Some(name) = m
+                .get("functionCall")
+                .and_then(|f| f.get("name"))
+                .and_then(|n| n.as_str())
+            {
+                out.push(name.to_string());
+            }
+            if let Some(name) = m
+                .get("function_call")
+                .and_then(|f| f.get("name"))
+                .and_then(|n| n.as_str())
+            {
+                out.push(name.to_string());
+            }
+            for val in m.values() {
+                collect_vertex_tools(val, out);
+            }
+        }
+        Value::Array(a) => {
+            for val in a {
+                collect_vertex_tools(val, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Walk a Bedrock invocation record for `toolUse.name` occurrences anywhere in
 /// the output body (Converse) — the structure nests differently across models,
 /// so a recursive scan is the most robust option.
@@ -420,5 +689,50 @@ mod tests {
           {"id":"b","model":"gpt-4o","choices":[{"message":{"content":"y"}}]}]}"#;
         let out = Adapter::Openai.convert(raw).unwrap();
         assert_eq!(out.len(), 2);
+    }
+
+    #[test]
+    fn azure_openai_lifts_diagnostic_columns() {
+        let raw = r#"{"CorrelationId":"corr-1","properties_modelDeploymentName_s":"gpt-4o",
+          "properties_user_s":"alice","TimeGenerated":"2026-03-01T00:00:00Z",
+          "properties_response_s":"{\"choices\":[{\"message\":{\"tool_calls\":[{\"function\":{\"name\":\"lookup\"}}]}}]}"}"#;
+        let out = Adapter::AzureOpenai.convert(raw).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0]["provider"], "azure");
+        assert_eq!(out[0]["request_id"], "corr-1");
+        assert_eq!(out[0]["tool_name"], "lookup");
+        assert_eq!(out[0]["user_id"], "alice");
+    }
+
+    #[test]
+    fn langsmith_run_object() {
+        let raw = r#"{"id":"run-9","run_type":"tool","name":"delete_row",
+          "start_time":"2026-04-01T12:00:00Z",
+          "extra":{"metadata":{"ls_model_name":"gpt-4o","ls_provider":"openai","user_id":"u1"}}}"#;
+        let out = Adapter::Langsmith.convert(raw).unwrap();
+        assert_eq!(out[0]["tool_name"], "delete_row");
+        assert_eq!(out[0]["model"], "gpt-4o");
+        assert_eq!(out[0]["user_id"], "u1");
+    }
+
+    #[test]
+    fn anthropic_messages_tool_use() {
+        let raw = r#"{"id":"msg_1","model":"claude-3-5","metadata":{"user_id":"pat"},
+          "content":[{"type":"text","text":"ok"},{"type":"tool_use","name":"send_email"}]}"#;
+        let out = Adapter::Anthropic.convert(raw).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0]["provider"], "anthropic");
+        assert_eq!(out[0]["tool_name"], "send_email");
+        assert_eq!(out[0]["user_id"], "pat");
+    }
+
+    #[test]
+    fn vertex_function_call() {
+        let raw = r#"{"requestId":"v-1","model":"gemini-1.5-pro",
+          "candidates":[{"content":{"parts":[{"functionCall":{"name":"make_payment"}}]}}]}"#;
+        let out = Adapter::Vertex.convert(raw).unwrap();
+        assert_eq!(out[0]["provider"], "vertex");
+        assert_eq!(out[0]["tool_name"], "make_payment");
+        assert_eq!(out[0]["request_id"], "v-1");
     }
 }

@@ -11,10 +11,15 @@ If you don't have any logs yet, that's the common case. Two ways forward:
    Pull one and convert it in a single step:
 
    ```bash
-   compass ingest --from openai   --input openai-export.jsonl
-   compass ingest --from litellm  --input litellm-logs.jsonl
-   compass ingest --from bedrock  --input bedrock-invocations.jsonl
-   compass ingest --from csv      --input requests.csv
+   compass ingest --from openai        --input openai-export.jsonl
+   compass ingest --from azure-openai --input azure-export.json
+   compass ingest --from langsmith     --input langsmith-runs.jsonl
+   compass ingest --from anthropic     --input anthropic-messages.jsonl
+   compass ingest --from vertex        --input vertex-logs.jsonl
+   compass ingest --from bedrock        --input bedrock-invocations.jsonl
+   compass ingest --from csv          --input requests.csv
+   compass ingest --doc risk-register.pdf --for art_11_annex_iv
+   compass ingest --mcp-allowlist mcp-servers.json
    ```
 
 2. **Record from live traffic.** No logs at all? Put Compass in front of your

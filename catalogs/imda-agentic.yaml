@@ -143,7 +143,7 @@ controls:
       Can you take agents offline or limit blast radius on malfunction (circuit
       breaker, gateway-wide emergency stop: off / read-only / halt)?
     weight: 2
-    auto_checks: [action_risk_coverage]
+    auto_checks: [action_risk_coverage, emergency_stop]
     remediation: >
       Add a gateway-wide emergency stop with off/read-only/halt modes and a
       circuit breaker, and record activations in the audit chain.
@@ -280,6 +280,7 @@ controls:
       Are agents restricted to a whitelist of trusted MCP servers, with
       untrusted/unapproved servers denied before dispatch?
     weight: 2
+    auto_checks: [mcp_allowlist]
     remediation: >
       Maintain an MCP trust registry and deny calls to untrusted or unapproved
       servers on the request path; hash-chain the denials.

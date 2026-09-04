@@ -1,0 +1,145 @@
+name: "Aperion Compass"
+description: "Score a Compass assessment, upload SARIF, attach the HTML, comment the diff on PRs."
+author: Aperion
+branding:
+  icon: shield
+  color: purple
+inputs:
+  assessment:
+    description: Path to compass-assessment.yaml
+    required: false
+    default: compass-assessment.yaml
+  baseline:
+    description: Committed scorecard JSON used as the ratchet. Empty to skip.
+    required: false
+    default: compass-baseline.json
+  out:
+    description: Output basename (extensions are appended).
+    required: false
+    default: compass-report
+  version:
+    description: Release tag to install (e.g. compass-v0.6.0). Defaults to this action's ref.
+    required: false
+    default: ""
+  github-token:
+    description: Token for PR comments and SARIF upload.
+    required: false
+    default: ${{ github.token }}
+runs:
+  using: composite
+  steps:
+    - name: Install compass
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        TAG="${INPUT_VERSION}"
+        if [ -z "$TAG" ]; then
+          TAG="${GITHUB_ACTION_REF:-}"
+        fi
+        TAG="${TAG#refs/tags/}"
+        if [[ "$TAG" != compass-v* ]]; then
+          echo "Pin this action to a compass-v* tag, or pass version: compass-vX.Y.Z (got '${TAG}')."
+          exit 1
+        fi
+        case "${RUNNER_OS}-${RUNNER_ARCH}" in
+          Linux-X64)     TARGET=x86_64-unknown-linux-gnu; EXT=tar.gz ;;
+          Linux-ARM64)   TARGET=aarch64-unknown-linux-gnu; EXT=tar.gz ;;
+          macOS-X64)     TARGET=x86_64-apple-darwin; EXT=tar.gz ;;
+          macOS-ARM64)   TARGET=aarch64-apple-darwin; EXT=tar.gz ;;
+          Windows-X64)   TARGET=x86_64-pc-windows-msvc; EXT=zip ;;
+          *) echo "unsupported runner ${RUNNER_OS}-${RUNNER_ARCH}"; exit 1 ;;
+        esac
+        ARCHIVE="aperion-compass-${TAG}-${TARGET}.${EXT}"
+        URL="https://github.com/AperionAI/compass/releases/download/${TAG}/${ARCHIVE}"
+        mkdir -p "$HOME/.aperion-compass"
+        curl -fsSL "$URL" -o "$HOME/.aperion-compass/${ARCHIVE}"
+        if [[ "$EXT" == "zip" ]]; then
+          python - <<PY
+        import zipfile, os
+        zipfile.ZipFile(os.path.expanduser("$HOME/.aperion-compass/${ARCHIVE}")).extractall(os.path.expanduser("$HOME/.aperion-compass"))
+        PY
+        else
+          tar -xzf "$HOME/.aperion-compass/${ARCHIVE}" -C "$HOME/.aperion-compass"
+        fi
+        echo "$HOME/.aperion-compass" >> "$GITHUB_PATH"
+        chmod +x "$HOME/.aperion-compass/compass" 2>/dev/null || true
+        echo "Installed ${TAG} (${TARGET})"
+
+    - name: Score
+      shell: bash
+      run: |
+        set -euo pipefail
+        ASSESSMENT="${{ inputs.assessment }}"
+        BASELINE="${{ inputs.baseline }}"
+        OUT="${{ inputs.out }}"
+        ARGS=(report --assessment "$ASSESSMENT" --out "$OUT" --format html,json,junit,sarif)
+        if [ -n "$BASELINE" ] && [ -f "$BASELINE" ]; then
+          ARGS+=(--baseline "$BASELINE")
+        fi
+        compass "${ARGS[@]}"
+
+    - name: Diff vs baseline
+      if: always() && github.event_name == 'pull_request'
+      shell: bash
+      run: |
+        set -euo pipefail
+        BASELINE="${{ inputs.baseline }}"
+        OUT="${{ inputs.out }}.json"
+        if [ -n "$BASELINE" ] && [ -f "$BASELINE" ] && [ -f "$OUT" ]; then
+          compass diff "$BASELINE" "$OUT" --format md > compass-diff.md
+        else
+          echo "_No baseline committed yet. Add compass-baseline.json after the first passing run._" > compass-diff.md
+        fi
+
+    - name: Comment on PR
+      if: always() && github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const fs = require('fs');
+          const body = fs.readFileSync('compass-diff.md', 'utf8');
+          const marker = '<!-- aperion-compass-diff -->';
+          const text = `${marker}\n${body}`;
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+          const existing = comments.find(c => c.body && c.body.includes(marker));
+          if (existing) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: existing.id,
+              body: text,
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: text,
+            });
+          }
+
+    - name: Upload report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: compass-report
+        path: |
+          ${{ inputs.out }}.html
+          ${{ inputs.out }}.json
+          ${{ inputs.out }}.junit.xml
+          ${{ inputs.out }}.sarif
+          compass-diff.md
+
+    - name: Upload SARIF
+      if: always()
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.out }}.sarif
+      continue-on-error: true

@@ -176,7 +176,7 @@ fn trunc(v: &[u64]) -> Vec<u64> {
     v.iter().take(20).copied().collect()
 }
 
-fn parse_entries(raw: &str) -> anyhow::Result<Vec<serde_json::Value>> {
+pub(crate) fn parse_entries(raw: &str) -> anyhow::Result<Vec<serde_json::Value>> {
     let trimmed = raw.trim_start();
     if trimmed.starts_with('[') {
         return Ok(serde_json::from_str(raw)?);

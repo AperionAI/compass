@@ -4,6 +4,8 @@
 //!   assess   interactive questionnaire → compass-assessment.yaml
 //!   ingest   register evidence files (logs, chain, approvals, credentials)
 //!   report   score + render HTML/Markdown/JSON; CI exit codes
+//!   diff     compare two scored JSON reports
+//!   explain  why one control is the colour it is
 //!   serve    live local dashboard
 //!   verify   standalone audit-chain verification
 //!
@@ -14,7 +16,9 @@ use aperion_compass::adapters::{Adapter, OutputKind};
 use aperion_compass::catalog::{self, BUNDLED_FRAMEWORKS};
 use aperion_compass::doctor;
 use aperion_compass::evidence::{self, CheckStatus, EvidenceBundle};
-use aperion_compass::questionnaire::{self, Assessment, EvidencePaths, DEFAULT_ASSESSMENT_PATH};
+use aperion_compass::questionnaire::{
+    self, Assessment, EvidenceDocument, EvidencePaths, DEFAULT_ASSESSMENT_PATH,
+};
 use aperion_compass::record::{self, RecordConfig};
 use aperion_compass::report::{self, Format};
 use aperion_compass::scoring::{self, Scorecard, DEFAULT_PASS_THRESHOLD};
@@ -41,11 +45,16 @@ enum Command {
     /// into canonical evidence, then register it.
     Ingest(IngestArgs),
     /// Report which automated checks have evidence and how to close the gaps.
+    /// `--json` for the machine-readable form.
     Doctor(DoctorArgs),
     /// Capture tamper-evident evidence from live traffic (recording proxy).
     Record(RecordArgs),
     /// Score the assessment and render a report (HTML / Markdown / JSON).
     Report(ReportArgs),
+    /// Diff two scored JSON reports (PR comment).
+    Diff(DiffArgs),
+    /// Explain why one control is the colour it is.
+    Explain(ExplainArgs),
     /// Serve a live local dashboard that re-scans on demand.
     Serve(ServeArgs),
     /// Independently verify a tamper-evident audit-chain export.
@@ -132,6 +141,9 @@ struct EvidenceArgs {
     /// Generic (non-Smartflow) request-log export (JSONL or JSON array).
     #[arg(long)]
     generic: Option<String>,
+    /// MCP server allowlist export (JSON array, JSONL, or `{ "servers": […] }`).
+    #[arg(long)]
+    mcp_allowlist: Option<String>,
 }
 
 impl EvidenceArgs {
@@ -157,6 +169,9 @@ impl EvidenceArgs {
         }
         if self.generic.is_some() {
             base.generic = self.generic.clone();
+        }
+        if self.mcp_allowlist.is_some() {
+            base.mcp_allowlist = self.mcp_allowlist.clone();
         }
     }
 }
@@ -184,7 +199,8 @@ struct IngestArgs {
     #[arg(long)]
     framework: Option<String>,
     /// Convert a native export before registering: openai | litellm | bedrock |
-    /// csv | csv-approvals. Requires --input.
+    /// azure-openai | langsmith | anthropic | vertex | csv | csv-approvals.
+    /// Requires --input.
     #[arg(long)]
     from: Option<String>,
     /// Path to the native export to convert (used with --from).
@@ -194,6 +210,12 @@ struct IngestArgs {
     /// defaults to compass-logs.jsonl / compass-approvals.jsonl).
     #[arg(long)]
     out: Option<String>,
+    /// Attach a document (PDF, register, policy) by path + SHA-256. Does not parse it.
+    #[arg(long)]
+    doc: Option<String>,
+    /// Control id(s) this document is evidence for (comma-separated). Required with --doc.
+    #[arg(long = "for", value_delimiter = ',')]
+    for_controls: Vec<String>,
     #[command(flatten)]
     evidence: EvidenceArgs,
 }
@@ -208,6 +230,12 @@ struct DoctorArgs {
     framework: Option<String>,
     #[command(flatten)]
     evidence: EvidenceArgs,
+    /// Flag evidence older than this many days as stale (default: assessment freshness_days, 90).
+    #[arg(long)]
+    freshness_days: Option<u32>,
+    /// Machine-readable JSON instead of the text report.
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -226,6 +254,13 @@ struct RecordArgs {
     /// omitted, a key is generated and written to <out>.key.
     #[arg(long)]
     hmac_key: Option<String>,
+    /// Store SHA-256 of request/response bodies instead of the text.
+    /// Currently the only value is `bodies`.
+    #[arg(long, value_name = "WHAT")]
+    redact: Option<String>,
+    /// Extra PEM of corporate / MITM CA certs, added on top of webpki roots.
+    #[arg(long)]
+    upstream_ca: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -252,6 +287,17 @@ struct ReportArgs {
     no_exit_code: bool,
     #[command(flatten)]
     evidence: EvidenceArgs,
+    /// Flag evidence older than this many days as stale (default: assessment freshness_days, 90).
+    #[arg(long)]
+    freshness_days: Option<u32>,
+    /// Previous scorecard JSON. Fail (exit 1) if the current score drops below it.
+    /// Integrity failure still exits 2. Replaces --threshold as the CI gate.
+    #[arg(long)]
+    baseline: Option<String>,
+    /// Write the current scorecard to --baseline when the score improves
+    /// (or when the file does not exist yet).
+    #[arg(long)]
+    update_baseline: bool,
 }
 
 #[derive(Debug, Args)]
@@ -282,6 +328,33 @@ struct VerifyArgs {
     chain_hmac_key: Option<String>,
 }
 
+#[derive(Debug, Args)]
+struct DiffArgs {
+    /// Previous scorecard JSON (`compass report --format json`).
+    old: String,
+    /// New scorecard JSON.
+    new: String,
+    /// md (default, PR comment) or json.
+    #[arg(long, default_value = "md")]
+    format: String,
+}
+
+#[derive(Debug, Args)]
+struct ExplainArgs {
+    /// Control id (e.g. art_12_traceability).
+    control_id: String,
+    /// Assessment file to score.
+    #[arg(long, default_value = DEFAULT_ASSESSMENT_PATH)]
+    assessment: String,
+    /// Override the frameworks to score.
+    #[arg(long)]
+    framework: Option<String>,
+    #[command(flatten)]
+    evidence: EvidenceArgs,
+    #[arg(long)]
+    freshness_days: Option<u32>,
+}
+
 fn main() {
     let cli = Cli::parse();
     let code = match run(cli) {
@@ -301,6 +374,8 @@ fn run(cli: Cli) -> Result<i32> {
         Command::Doctor(a) => cmd_doctor(a),
         Command::Record(a) => cmd_record(a),
         Command::Report(a) => cmd_report(a),
+        Command::Diff(a) => cmd_diff(a),
+        Command::Explain(a) => cmd_explain(a),
         Command::Serve(a) => cmd_serve(a),
         Command::Verify(a) => cmd_verify(a),
         Command::Attest(a) => cmd_attest(a),
@@ -414,7 +489,7 @@ fn cmd_ingest(a: IngestArgs) -> Result<i32> {
 
     let mut assessment = if std::path::Path::new(&a.assessment).exists() {
         Assessment::from_path(&a.assessment)?
-    } else if a.framework.is_some() || converted.is_some() {
+    } else if a.framework.is_some() || converted.is_some() || a.doc.is_some() {
         // Scaffold on the fly: explicit --framework, or default set when the
         // user is just converting evidence for a brand-new assessment.
         let tokens = parse_framework_tokens(a.framework.as_deref().unwrap_or("eu-ai-act,imda"));
@@ -435,6 +510,32 @@ fn cmd_ingest(a: IngestArgs) -> Result<i32> {
         }
     }
 
+    if let Some(doc_path) = &a.doc {
+        if a.for_controls.is_empty() {
+            return Err(anyhow!(
+                "--doc requires --for <control_id> (comma-separated control ids)"
+            ));
+        }
+        let (sha, captured) = aperion_compass::evidence::documents::hash_file(doc_path)
+            .with_context(|| format!("hashing {doc_path}"))?;
+        assessment
+            .evidence
+            .documents
+            .retain(|d| d.path != *doc_path);
+        assessment.evidence.documents.push(EvidenceDocument {
+            path: doc_path.clone(),
+            sha256: sha.clone(),
+            captured_at: captured,
+            for_controls: a.for_controls.clone(),
+        });
+        println!(
+            "Attached {} (sha256 {}…) for {}",
+            doc_path,
+            &sha[..12.min(sha.len())],
+            a.for_controls.join(", ")
+        );
+    }
+
     a.evidence.merge_into(&mut assessment.evidence);
     assessment.save(&a.assessment)?;
 
@@ -450,10 +551,19 @@ fn cmd_ingest(a: IngestArgs) -> Result<i32> {
             ("credentials", &e.credentials),
             ("jwks", &e.jwks),
             ("generic", &e.generic),
+            ("mcp_allowlist", &e.mcp_allowlist),
         ] {
             if let Some(v) = val {
                 println!("  {label:<12} {v}");
             }
+        }
+        for d in &e.documents {
+            println!(
+                "  {:<12} {}  for {}",
+                "doc",
+                d.path,
+                d.for_controls.join(", ")
+            );
         }
         println!("Run `compass report` to score with these checks.");
     }
@@ -474,23 +584,56 @@ fn cmd_doctor(a: DoctorArgs) -> Result<i32> {
 
     let mut paths = assessment.evidence.clone();
     a.evidence.merge_into(&mut paths);
+    let days = a.freshness_days.unwrap_or(assessment.freshness_days);
     let bundle = if paths.is_empty() {
         EvidenceBundle::default()
     } else {
-        evidence::run_all(&paths)
+        evidence::run_all_with(&paths, days)
     };
 
     let diag = doctor::diagnose(&catalogs, &paths, &bundle);
+    if a.json {
+        let mut v: serde_json::Value = serde_json::from_str(&doctor::render_json(&diag)?)?;
+        if let Some(obj) = v.as_object_mut() {
+            obj.insert("stale".into(), serde_json::json!(bundle.stale));
+            obj.insert("documents".into(), serde_json::to_value(&bundle.documents)?);
+        }
+        println!("{}", serde_json::to_string_pretty(&v)?);
+        return Ok(0);
+    }
     print!("{}", doctor::render_text(&diag));
+    if !bundle.stale.is_empty() {
+        println!("Stale evidence (older than {days} days):");
+        for s in &bundle.stale {
+            println!("  {s}");
+        }
+        println!();
+    }
+    if !bundle.documents.is_empty() {
+        println!("Documents:");
+        for (id, o) in &bundle.documents {
+            println!("  {id}: {} — {}", o.status.as_str(), o.summary);
+        }
+        println!();
+    }
     Ok(0)
 }
 
 fn cmd_record(a: RecordArgs) -> Result<i32> {
+    let redact_bodies = match a.redact.as_deref() {
+        None => false,
+        Some(s) if s.eq_ignore_ascii_case("bodies") => true,
+        Some(s) => {
+            return Err(anyhow!("unknown --redact '{s}' (use --redact bodies)"));
+        }
+    };
     record::run(RecordConfig {
         port: a.port,
         upstream: a.upstream,
         out: a.out,
         hmac_key: a.hmac_key,
+        redact_bodies,
+        upstream_ca: a.upstream_ca,
     })?;
     Ok(0)
 }
@@ -520,14 +663,16 @@ fn build_scorecard(
     framework: &Option<String>,
     evidence_override: &EvidenceArgs,
     threshold: f64,
+    freshness_days: Option<u32>,
 ) -> Result<(Vec<catalog::Catalog>, Scorecard)> {
     let catalogs = catalogs_for(assessment, framework)?;
     let mut paths = assessment.evidence.clone();
     evidence_override.merge_into(&mut paths);
+    let days = freshness_days.unwrap_or(assessment.freshness_days);
     let bundle: EvidenceBundle = if paths.is_empty() {
         EvidenceBundle::default()
     } else {
-        evidence::run_all(&paths)
+        evidence::run_all_with(&paths, days)
     };
     let card = scoring::score(&catalogs, assessment, &bundle, threshold.clamp(0.0, 100.0));
     Ok((catalogs, card))
@@ -541,7 +686,13 @@ fn cmd_report(a: ReportArgs) -> Result<i32> {
         )
     })?;
 
-    let (_cats, card) = build_scorecard(&assessment, &a.framework, &a.evidence, a.threshold)?;
+    let (_cats, card) = build_scorecard(
+        &assessment,
+        &a.framework,
+        &a.evidence,
+        a.threshold,
+        a.freshness_days,
+    )?;
 
     let formats: Vec<Format> = a
         .format
@@ -574,11 +725,52 @@ fn cmd_report(a: ReportArgs) -> Result<i32> {
 
     print_summary(&card);
 
+    let mut code = card.recommended_exit_code;
+    if let Some(path) = &a.baseline {
+        code = apply_baseline(&card, path, a.update_baseline)?;
+    } else if a.update_baseline {
+        return Err(anyhow!("--update-baseline requires --baseline <path>"));
+    }
+
     if a.no_exit_code {
         Ok(0)
     } else {
-        Ok(card.recommended_exit_code)
+        Ok(code)
     }
+}
+
+fn apply_baseline(card: &Scorecard, path: &str, update: bool) -> Result<i32> {
+    if card.integrity_failure {
+        println!("Baseline not consulted: evidence integrity failure.");
+        return Ok(scoring::EXIT_INTEGRITY_FAILURE);
+    }
+
+    if !std::path::Path::new(path).exists() {
+        if !update {
+            return Err(anyhow!(
+                "baseline {path} not found; pass --update-baseline to create it from this run"
+            ));
+        }
+        std::fs::write(path, serde_json::to_string_pretty(card)?)
+            .with_context(|| format!("writing baseline {path}"))?;
+        println!("Created baseline {path} at {} / 100.", card.score_int());
+        return Ok(scoring::EXIT_PASS);
+    }
+
+    let old = Scorecard::from_json_path(path)?;
+    let old_i = old.score_int();
+    let new_i = card.score_int();
+    println!("Baseline {old_i} → {new_i} ({path})");
+    if new_i < old_i {
+        println!("Score dropped below baseline.");
+        return Ok(scoring::EXIT_BELOW_THRESHOLD);
+    }
+    if update && new_i > old_i {
+        std::fs::write(path, serde_json::to_string_pretty(card)?)
+            .with_context(|| format!("writing baseline {path}"))?;
+        println!("Updated baseline {path} ({old_i} → {new_i}).");
+    }
+    Ok(scoring::EXIT_PASS)
 }
 
 fn strip_known_ext(out: &str) -> String {
@@ -639,11 +831,46 @@ fn cmd_serve(a: ServeArgs) -> Result<i32> {
     let recompute = move || -> Result<Scorecard> {
         let assessment = Assessment::from_path(&assessment_path)?;
         let (_cats, card) =
-            build_scorecard(&assessment, &framework, &evidence_override, threshold)?;
+            build_scorecard(&assessment, &framework, &evidence_override, threshold, None)?;
         Ok(card)
     };
 
     aperion_compass::serve::run(a.port, recompute)?;
+    Ok(0)
+}
+
+fn cmd_diff(a: DiffArgs) -> Result<i32> {
+    let old = Scorecard::from_json_path(&a.old)?;
+    let new = Scorecard::from_json_path(&a.new)?;
+    let d = aperion_compass::diff::diff(&old, &new);
+    match a.format.trim().to_ascii_lowercase().as_str() {
+        "json" => print!("{}", aperion_compass::diff::render_json(&d)?),
+        "md" | "markdown" => print!("{}", aperion_compass::diff::render_markdown(&d)),
+        other => {
+            return Err(anyhow!("unknown --format '{other}' (use md or json)"));
+        }
+    }
+    Ok(0)
+}
+
+fn cmd_explain(a: ExplainArgs) -> Result<i32> {
+    let assessment = Assessment::from_path(&a.assessment).with_context(|| {
+        format!(
+            "load assessment (run `compass assess` first?) {}",
+            a.assessment
+        )
+    })?;
+    let (catalogs, card) = build_scorecard(
+        &assessment,
+        &a.framework,
+        &a.evidence,
+        scoring::DEFAULT_PASS_THRESHOLD,
+        a.freshness_days,
+    )?;
+    print!(
+        "{}",
+        aperion_compass::explain::render(&a.control_id, &catalogs, &card, &card.evidence)?
+    );
     Ok(0)
 }
 
@@ -673,7 +900,7 @@ fn cmd_attest_generate(a: AttestGenerateArgs) -> Result<i32> {
         )
     })?;
 
-    let (_cats, card) = build_scorecard(&assessment, &a.framework, &a.evidence, a.threshold)?;
+    let (_cats, card) = build_scorecard(&assessment, &a.framework, &a.evidence, a.threshold, None)?;
 
     // The chain path (for the tail anchor) is whatever the assessment / CLI
     // resolved to for the audit-chain evidence.

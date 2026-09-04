@@ -16,15 +16,17 @@
 //! buffers a copy to seal into the chain. It never talks to Aperion; the
 //! only network peer is the upstream you name.
 
+use crate::action_risk::{self, ActionContext};
 use crate::evidence::chain::{canonical_for_hmac, hmac_hex};
+use crate::evidence::sha256_hex;
 use anyhow::{anyhow, Context, Result};
 use base64::Engine;
-use rustls::pki_types::ServerName;
+use rustls::pki_types::{pem::PemObject, CertificateDer, ServerName};
 use rustls::{ClientConfig, ClientConnection, RootCertStore, StreamOwned};
 use serde_json::{Map, Value};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::Instant;
 
 /// Configuration for a recording session.
@@ -37,6 +39,10 @@ pub struct RecordConfig {
     /// HMAC key spec (`file:` | `base64:` | `hex:` | `env:` | bare). When
     /// absent, a fresh key is generated and written next to `out` as `<out>.key`.
     pub hmac_key: Option<String>,
+    /// Store SHA-256 of request/response bodies instead of (and never) the text.
+    pub redact_bodies: bool,
+    /// Extra PEM file of corporate / MITM CA certs, added on top of webpki roots.
+    pub upstream_ca: Option<String>,
 }
 
 struct Upstream {
@@ -81,18 +87,29 @@ fn parse_upstream(url: &str) -> Result<Upstream> {
     })
 }
 
-fn tls_config() -> Arc<ClientConfig> {
-    static CFG: OnceLock<Arc<ClientConfig>> = OnceLock::new();
-    CFG.get_or_init(|| {
-        let mut roots = RootCertStore::empty();
-        roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-        Arc::new(
-            ClientConfig::builder()
-                .with_root_certificates(roots)
-                .with_no_client_auth(),
-        )
-    })
-    .clone()
+fn build_tls_config(extra_ca: Option<&str>) -> Result<Arc<ClientConfig>> {
+    let mut roots = RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    if let Some(path) = extra_ca {
+        let mut added = 0usize;
+        let iter = CertificateDer::pem_file_iter(path)
+            .map_err(|e| anyhow!("reading upstream CA '{path}': {e}"))?;
+        for item in iter {
+            let cert = item.map_err(|e| anyhow!("parsing PEM in '{path}': {e}"))?;
+            roots
+                .add(cert)
+                .map_err(|e| anyhow!("adding CA from '{path}': {e}"))?;
+            added += 1;
+        }
+        if added == 0 {
+            return Err(anyhow!("no certificates found in '{path}'"));
+        }
+    }
+    Ok(Arc::new(
+        ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth(),
+    ))
 }
 
 enum UpStream {
@@ -124,7 +141,7 @@ impl Write for UpStream {
     }
 }
 
-fn connect_upstream(up: &Upstream) -> Result<UpStream> {
+fn connect_upstream(up: &Upstream, tls: &Arc<ClientConfig>) -> Result<UpStream> {
     let addr = format!("{}:{}", up.host, up.port);
     let sock = TcpStream::connect(&addr).with_context(|| format!("connecting upstream {addr}"))?;
     if !up.tls {
@@ -132,7 +149,7 @@ fn connect_upstream(up: &Upstream) -> Result<UpStream> {
     }
     let name = ServerName::try_from(up.host.clone())
         .map_err(|_| anyhow!("invalid TLS hostname '{}'", up.host))?;
-    let conn = ClientConnection::new(tls_config(), name).context("TLS client setup")?;
+    let conn = ClientConnection::new(tls.clone(), name).context("TLS client setup")?;
     Ok(UpStream::Tls(Box::new(StreamOwned::new(conn, sock))))
 }
 
@@ -396,8 +413,9 @@ fn forward_and_tee(
     req: &HttpRequest,
     client: &mut TcpStream,
     headers_sent: &mut bool,
+    tls: &Arc<ClientConfig>,
 ) -> Result<HttpResponse> {
-    let mut sock = connect_upstream(up)?;
+    let mut sock = connect_upstream(up, tls)?;
 
     let mut head = format!("{} {} HTTP/1.1\r\n", req.method, req.path);
     head.push_str(&format!("Host: {}\r\n", up.host_header));
@@ -464,13 +482,15 @@ fn forward_and_tee(
 /// unit-tested without sockets.
 pub fn payload_for_exchange(
     provider: &str,
+    path: &str,
     req_body: &[u8],
     resp_body: &[u8],
     status_code: u16,
     latency_ms: u128,
+    redact_bodies: bool,
 ) -> Map<String, Value> {
     let req: Value = serde_json::from_slice(req_body).unwrap_or(Value::Null);
-    let resp = parse_response_body(resp_body);
+    let resp = parse_response_body(path, resp_body);
 
     let mut o = Map::new();
     o.insert("type".into(), Value::from("llm_call"));
@@ -481,11 +501,17 @@ pub fn payload_for_exchange(
     o.insert("provider".into(), Value::from(provider));
     o.insert("status_code".into(), Value::from(status_code));
     o.insert("latency_ms".into(), Value::from(latency_ms as u64));
+    if !path.is_empty() {
+        o.insert("path".into(), Value::from(path));
+    }
 
-    if let Some(id) = resp.get("id").and_then(|v| v.as_str()) {
+    if let Some(id) = resp
+        .get("id")
+        .and_then(|v| v.as_str())
+        .or_else(|| req.get("id").and_then(|v| v.as_str()))
+    {
         o.insert("request_id".into(), Value::from(id));
     }
-    // Model: prefer the response's echoed model, else the request's.
     let model = resp
         .get("model")
         .and_then(|v| v.as_str())
@@ -493,13 +519,28 @@ pub fn payload_for_exchange(
     if let Some(m) = model {
         o.insert("model".into(), Value::from(m));
     }
-    if let Some(u) = req.get("user").and_then(|v| v.as_str()) {
+    let user = req.get("user").and_then(|v| v.as_str()).or_else(|| {
+        req.get("metadata")
+            .and_then(|m| m.get("user_id"))
+            .and_then(|v| v.as_str())
+    });
+    if let Some(u) = user {
         o.insert("user_id".into(), Value::from(u));
     }
 
-    let tools = tool_names(&resp);
+    let mut tools = tool_names(&resp);
+    collect_anthropic_tools(&resp, &mut tools);
+    collect_anthropic_tools(&req, &mut tools);
+    if looks_like_anthropic(path, &req, &resp) && tools.is_empty() {
+        collect_anthropic_tools(&resp, &mut tools);
+    }
     if let Some(first) = tools.first() {
         o.insert("tool_name".into(), Value::from(first.clone()));
+        let tier = action_risk::resolve(&ActionContext {
+            tool_or_method: Some(first.as_str()),
+            ..Default::default()
+        });
+        o.insert("action_risk_tier".into(), Value::from(tier.as_str()));
     }
     if !tools.is_empty() {
         o.insert(
@@ -507,7 +548,23 @@ pub fn payload_for_exchange(
             Value::Array(tools.into_iter().map(Value::from).collect()),
         );
     }
+
+    if redact_bodies {
+        o.insert("request_sha256".into(), Value::from(sha256_hex(req_body)));
+        o.insert("response_sha256".into(), Value::from(sha256_hex(resp_body)));
+        o.insert("bodies_redacted".into(), Value::from(true));
+    }
     o
+}
+
+fn looks_like_anthropic(path: &str, req: &Value, resp: &Value) -> bool {
+    let p = path.to_ascii_lowercase();
+    p.contains("/v1/messages")
+        || p.contains("/messages")
+        || resp.get("content").and_then(|c| c.as_array()).is_some()
+        || req.get("max_tokens").is_some()
+            && req.get("messages").is_some()
+            && resp.get("choices").is_none()
 }
 
 fn tool_names(resp: &Value) -> Vec<String> {
@@ -536,16 +593,16 @@ fn tool_names(resp: &Value) -> Vec<String> {
 
 /// JSON body, or an OpenAI-style SSE stream reconstructed enough to extract
 /// id / model / tool names.
-fn parse_response_body(body: &[u8]) -> Value {
+fn parse_response_body(path: &str, body: &[u8]) -> Value {
     if let Ok(v) = serde_json::from_slice::<Value>(body) {
         if !v.is_null() {
             return v;
         }
     }
-    parse_sse(body)
+    parse_sse(path, body)
 }
 
-fn parse_sse(body: &[u8]) -> Value {
+fn parse_sse(_path: &str, body: &[u8]) -> Value {
     let text = String::from_utf8_lossy(body);
     let mut id: Option<String> = None;
     let mut model: Option<String> = None;
@@ -562,15 +619,34 @@ fn parse_sse(body: &[u8]) -> Value {
             continue;
         };
         if id.is_none() {
-            id = v.get("id").and_then(|x| x.as_str()).map(|s| s.to_string());
+            id = v
+                .get("id")
+                .and_then(|x| x.as_str())
+                .map(|s| s.to_string())
+                .or_else(|| {
+                    v.get("message")
+                        .and_then(|m| m.get("id"))
+                        .and_then(|x| x.as_str())
+                        .map(|s| s.to_string())
+                });
         }
         if model.is_none() {
             model = v
                 .get("model")
                 .and_then(|x| x.as_str())
-                .map(|s| s.to_string());
+                .map(|s| s.to_string())
+                .or_else(|| {
+                    v.get("message")
+                        .and_then(|m| m.get("model"))
+                        .and_then(|x| x.as_str())
+                        .map(|s| s.to_string())
+                });
         }
         collect_tool_names(&v, &mut tools);
+        collect_anthropic_tools(&v, &mut tools);
+        if let Some(msg) = v.get("message") {
+            collect_anthropic_tools(msg, &mut tools);
+        }
     }
     let mut o = Map::new();
     if let Some(id) = id {
@@ -580,16 +656,45 @@ fn parse_sse(body: &[u8]) -> Value {
         o.insert("model".into(), Value::from(model));
     }
     if !tools.is_empty() {
-        let calls: Vec<Value> = tools
-            .into_iter()
+        let names = tools.clone();
+        let calls: Vec<Value> = names
+            .iter()
             .map(|n| serde_json::json!({"function": {"name": n}}))
             .collect();
         o.insert(
             "choices".into(),
             serde_json::json!([{"message": {"tool_calls": calls}}]),
         );
+        let blocks: Vec<Value> = names
+            .into_iter()
+            .map(|n| serde_json::json!({"type": "tool_use", "name": n}))
+            .collect();
+        o.insert("content".into(), Value::Array(blocks));
     }
     Value::Object(o)
+}
+
+fn collect_anthropic_tools(v: &Value, tools: &mut Vec<String>) {
+    if let Some(blocks) = v.get("content").and_then(|c| c.as_array()) {
+        for b in blocks {
+            if b.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
+                if let Some(name) = b.get("name").and_then(|n| n.as_str()) {
+                    if !name.is_empty() && !tools.iter().any(|t| t == name) {
+                        tools.push(name.to_string());
+                    }
+                }
+            }
+        }
+    }
+    if let Some(block) = v.get("content_block") {
+        if block.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
+            if let Some(name) = block.get("name").and_then(|n| n.as_str()) {
+                if !name.is_empty() && !tools.iter().any(|t| t == name) {
+                    tools.push(name.to_string());
+                }
+            }
+        }
+    }
 }
 
 fn collect_tool_names(v: &Value, tools: &mut Vec<String>) {
@@ -673,6 +778,7 @@ fn resolve_key(cfg: &RecordConfig) -> Result<(Vec<u8>, Option<String>)> {
 pub fn run(cfg: RecordConfig) -> Result<()> {
     let up = parse_upstream(&cfg.upstream)?;
     let provider = provider_for(&up.host);
+    let tls = build_tls_config(cfg.upstream_ca.as_deref())?;
 
     let (key, generated_key_path) = resolve_key(&cfg)?;
     let mut chain = ChainWriter::new(key);
@@ -692,6 +798,12 @@ pub fn run(cfg: RecordConfig) -> Result<()> {
     println!("  listening   http://{addr}");
     println!("  forwarding  {} (provider: {provider})", cfg.upstream);
     println!("  writing     {} (hash-chained JSONL)", cfg.out);
+    if cfg.redact_bodies {
+        println!("  redact      bodies (hashes only)");
+    }
+    if let Some(ca) = &cfg.upstream_ca {
+        println!("  upstream CA {ca}");
+    }
     if let Some(kp) = &generated_key_path {
         let spec = format!("file:{kp}");
         println!("  hmac key    {kp}  (generated)");
@@ -715,6 +827,8 @@ pub fn run(cfg: RecordConfig) -> Result<()> {
             &mut client,
             &up,
             provider,
+            &tls,
+            cfg.redact_bodies,
             &mut chain,
             &mut out,
             &mut headers_sent,
@@ -730,10 +844,13 @@ pub fn run(cfg: RecordConfig) -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_connection(
     client: &mut TcpStream,
     up: &Upstream,
     provider: &str,
+    tls: &Arc<ClientConfig>,
+    redact_bodies: bool,
     chain: &mut ChainWriter,
     out: &mut std::fs::File,
     headers_sent: &mut bool,
@@ -750,17 +867,19 @@ fn handle_connection(
     }
 
     let started = Instant::now();
-    let resp = forward_and_tee(up, &req, client, headers_sent)?;
+    let resp = forward_and_tee(up, &req, client, headers_sent, tls)?;
     let latency_ms = started.elapsed().as_millis();
 
     // Only record calls that look like model invocations (have a JSON body).
     if req.method == "POST" && !req.body.is_empty() {
         let payload = payload_for_exchange(
             provider,
+            &req.path,
             &req.body,
             &resp.body,
             resp.status_code,
             latency_ms,
+            redact_bodies,
         );
         let entry = chain.seal(payload);
         writeln!(out, "{}", serde_json::to_string(&entry)?)?;
@@ -848,7 +967,7 @@ mod tests {
         let req = br#"{"model":"gpt-4o","user":"alice","messages":[]}"#;
         let resp = br#"{"id":"cmpl-9","model":"gpt-4o-2024",
           "choices":[{"message":{"tool_calls":[{"function":{"name":"delete_row"}}]}}]}"#;
-        let p = payload_for_exchange("openai", req, resp, 200, 42);
+        let p = payload_for_exchange("openai", "/v1/chat/completions", req, resp, 200, 42, false);
         assert_eq!(p.get("request_id").unwrap(), "cmpl-9");
         assert_eq!(p.get("model").unwrap(), "gpt-4o-2024");
         assert_eq!(p.get("user_id").unwrap(), "alice");
@@ -862,9 +981,40 @@ mod tests {
             b"data: {\"id\":\"cmpl-sse\",\"model\":\"gpt-4o\",\"choices\":[{\"delta\":{}}]}\n\n\
 data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"function\":{\"name\":\"send_wire\"}}]}}]}\n\n\
 data: [DONE]\n\n";
-        let p = payload_for_exchange("openai", req, resp, 200, 12);
+        let p = payload_for_exchange("openai", "/v1/chat/completions", req, resp, 200, 12, false);
         assert_eq!(p.get("request_id").unwrap(), "cmpl-sse");
         assert_eq!(p.get("model").unwrap(), "gpt-4o");
         assert_eq!(p.get("tool_name").unwrap(), "send_wire");
+        assert_eq!(p.get("action_risk_tier").unwrap(), "T3");
+    }
+
+    #[test]
+    fn payload_parses_anthropic_messages() {
+        let req = br#"{"model":"claude-3-5","max_tokens":128,"metadata":{"user_id":"pat"},
+          "messages":[{"role":"user","content":"hi"}]}"#;
+        let resp = br#"{"id":"msg_9","model":"claude-3-5-sonnet",
+          "content":[{"type":"text","text":"ok"},{"type":"tool_use","name":"lookup_file"}]}"#;
+        let p = payload_for_exchange("anthropic", "/v1/messages", req, resp, 200, 9, false);
+        assert_eq!(p.get("request_id").unwrap(), "msg_9");
+        assert_eq!(p.get("tool_name").unwrap(), "lookup_file");
+        assert_eq!(p.get("user_id").unwrap(), "pat");
+        assert_eq!(p.get("action_risk_tier").unwrap(), "T1");
+    }
+
+    #[test]
+    fn redact_stores_hashes_not_bodies() {
+        let req = br#"{"model":"gpt-4o","messages":[{"role":"user","content":"secret"}]}"#;
+        let resp = br#"{"id":"c1","choices":[{"message":{"content":"nope"}}]}"#;
+        let p = payload_for_exchange("openai", "/v1/chat/completions", req, resp, 200, 1, true);
+        assert_eq!(p.get("bodies_redacted").unwrap(), true);
+        assert!(
+            p.get("request_sha256")
+                .and_then(|v| v.as_str())
+                .unwrap()
+                .len()
+                == 64
+        );
+        assert!(p.get("response").is_none());
+        assert!(p.get("request").is_none());
     }
 }

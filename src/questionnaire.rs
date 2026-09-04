@@ -18,6 +18,13 @@ use std::io::Write;
 /// The current on-disk assessment schema version.
 pub const ASSESSMENT_VERSION: u32 = 1;
 
+/// Default age (days) after which evidence is flagged stale.
+pub const DEFAULT_FRESHNESS_DAYS: u32 = 90;
+
+fn default_freshness_days() -> u32 {
+    DEFAULT_FRESHNESS_DAYS
+}
+
 /// Default assessment filename.
 pub const DEFAULT_ASSESSMENT_PATH: &str = "compass-assessment.yaml";
 
@@ -100,6 +107,17 @@ impl FrameworkAssessment {
     }
 }
 
+/// A hashed document attached to one or more controls. Compass records the
+/// path and SHA-256; it does not parse the file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvidenceDocument {
+    pub path: String,
+    pub sha256: String,
+    pub captured_at: String,
+    #[serde(rename = "for", default)]
+    pub for_controls: Vec<String>,
+}
+
 /// Paths to evidence files registered with `ingest`. Stored so `report` can
 /// re-run the automated checks without re-specifying every path.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -118,6 +136,11 @@ pub struct EvidencePaths {
     pub jwks: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generic: Option<String>,
+    /// MCP server allowlist export (JSON array, JSONL, or `{ "servers": […] }`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp_allowlist: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub documents: Vec<EvidenceDocument>,
 }
 
 impl EvidencePaths {
@@ -127,6 +150,8 @@ impl EvidencePaths {
             && self.approvals.is_none()
             && self.credentials.is_none()
             && self.generic.is_none()
+            && self.mcp_allowlist.is_none()
+            && self.documents.is_empty()
     }
 }
 
@@ -142,6 +167,9 @@ pub struct Assessment {
     pub frameworks: Vec<FrameworkAssessment>,
     #[serde(default)]
     pub evidence: EvidencePaths,
+    /// Evidence older than this many days is flagged stale (default 90).
+    #[serde(default = "default_freshness_days")]
+    pub freshness_days: u32,
 }
 
 impl Assessment {
@@ -170,6 +198,7 @@ impl Assessment {
             system_name: None,
             frameworks,
             evidence: EvidencePaths::default(),
+            freshness_days: DEFAULT_FRESHNESS_DAYS,
         }
     }
 
@@ -377,6 +406,7 @@ mod tests {
                 answers: vec![], // empty — everything missing
             }],
             evidence: EvidencePaths::default(),
+            freshness_days: DEFAULT_FRESHNESS_DAYS,
         };
         a.reconcile_with(&cats);
         let n = a.framework("eu-ai-act").unwrap().answers.len();

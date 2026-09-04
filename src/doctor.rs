@@ -11,9 +11,10 @@
 use crate::catalog::{AutoCheck, Catalog};
 use crate::evidence::{CheckStatus, EvidenceBundle};
 use crate::questionnaire::EvidencePaths;
+use serde::Serialize;
 
 /// One check's diagnosis: did it run, and if not (or only partially), what to do.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CheckDiag {
     pub check: &'static str,
     pub controls_backed: usize,
@@ -26,7 +27,7 @@ pub struct CheckDiag {
 }
 
 /// The full gap report.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Diagnosis {
     pub checks: Vec<CheckDiag>,
     pub ran: usize,
@@ -54,7 +55,7 @@ fn meta_for(check: AutoCheck) -> CheckMeta {
         AutoCheck::ActionRiskCoverage => CheckMeta {
             playbook: "docs/evidence/README.md",
             remediation: "Provide request/tool logs. Convert an existing export with \
-                `compass ingest --from openai|litellm|bedrock|csv --input <export>` \
+                `compass ingest --from openai|litellm|bedrock|azure-openai|langsmith|anthropic|vertex|csv --input <export>` \
                 (see the per-provider playbooks).",
         },
         AutoCheck::LoggingCompleteness => CheckMeta {
@@ -79,6 +80,23 @@ fn meta_for(check: AutoCheck) -> CheckMeta {
             remediation: "Export signed agent credentials plus the issuer public key / \
                 JWKS and register them with `--credentials <file> --jwks <file>`.",
         },
+        AutoCheck::DocumentAttached => CheckMeta {
+            playbook: "docs/evidence/README.md",
+            remediation: "Attach the written artefact with \
+                `compass ingest --doc <file> --for <control_id>`. Compass stores the \
+                path and SHA-256; it does not parse the file.",
+        },
+        AutoCheck::McpAllowlist => CheckMeta {
+            playbook: "docs/evidence/README.md",
+            remediation: "Export your MCP server allowlist and register it with \
+                `compass ingest --mcp-allowlist <file>`.",
+        },
+        AutoCheck::EmergencyStop => CheckMeta {
+            playbook: "docs/evidence/audit-chain.md",
+            remediation: "Seal kill-switch / emergency-stop events into the audit chain \
+                (event `emergency_stop` with mode off / read_only / halt). `compass record` \
+                writes a chain you can add those events to.",
+        },
     }
 }
 
@@ -96,6 +114,9 @@ pub fn diagnose(
         AutoCheck::AuditChainIntegrity,
         AutoCheck::HumanOversight,
         AutoCheck::AgentIdentity,
+        AutoCheck::DocumentAttached,
+        AutoCheck::McpAllowlist,
+        AutoCheck::EmergencyStop,
     ];
 
     let mut checks = Vec::new();
@@ -204,6 +225,11 @@ pub fn render_text(d: &Diagnosis) -> String {
         s.push_str("All auto-verifiable checks have evidence. Run `compass report` to score.\n");
     }
     s
+}
+
+/// Machine-readable gap report.
+pub fn render_json(d: &Diagnosis) -> anyhow::Result<String> {
+    Ok(serde_json::to_string_pretty(d)?)
 }
 
 #[cfg(test)]

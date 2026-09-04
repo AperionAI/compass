@@ -105,14 +105,20 @@ exists. Two ways to get real evidence:
 
 ```bash
 # Convert something you already have (provider export → evidence)
-compass ingest --from openai   --input openai-export.json
-compass ingest --from litellm  --input litellm-logs.jsonl
-compass ingest --from bedrock  --input bedrock-invocations.jsonl
+compass ingest --from openai        --input openai-export.json
+compass ingest --from azure-openai --input azure-export.json
+compass ingest --from langsmith     --input langsmith-runs.jsonl
+compass ingest --from anthropic     --input anthropic-messages.jsonl
+compass ingest --from vertex        --input vertex-logs.jsonl
+compass ingest --from bedrock        --input bedrock-invocations.jsonl
 compass ingest --from csv-approvals --input approvals.csv   # Jira/ServiceNow export
+compass ingest --doc risk-register.pdf --for art_9_risk_system,art_11_annex_iv
+compass ingest --mcp-allowlist mcp-servers.json
 
 # Or capture it from live traffic: run this in front of your model
 # endpoint (http or https), point your SDK's base_url at it.
 compass record --upstream https://api.openai.com --out compass-record.jsonl
+# Optional: --redact bodies   --upstream-ca corp-root.pem
 
 # Then see exactly what's still missing and how to fix each gap
 compass doctor
@@ -156,10 +162,12 @@ want to compile it yourself.
 | Command | What it does |
 |---|---|
 | `compass assess` | Interactive questionnaire → `compass-assessment.yaml` (add `--defaults` to scaffold an editable file). |
-| `compass ingest` | Register evidence files; or `--from openai\|litellm\|bedrock\|csv\|csv-approvals --input <export>` to convert a native export into evidence first. |
-| `compass doctor` | Show which automated checks have evidence and, for every gap, the exact step to close it. |
-| `compass record` | Localhost OpenAI-compatible proxy that captures a tamper-evident log from live traffic (`http://` or `https://` upstreams; SSE is passed through). |
-| `compass report` | Score answers + evidence; write HTML / Markdown / JSON / JUnit / SARIF. Binding-now vs prepare-by dates show on each EU control. Unanswered controls inherit from a mapped peer when both frameworks are selected. |
+| `compass ingest` | Register evidence files; `--from openai\|litellm\|bedrock\|azure-openai\|langsmith\|anthropic\|vertex\|csv\|csv-approvals`; `--doc <file> --for <control>`; `--mcp-allowlist`. |
+| `compass doctor` | Show which automated checks have evidence and, for every gap, the exact step to close it. Flags stale files (default 90 days). `--json` for CI. |
+| `compass record` | Localhost recording proxy (`http://` or `https://` upstreams; SSE pass-through). `--redact bodies`, `--upstream-ca <pem>`. |
+| `compass report` | Score answers + evidence; write HTML / Markdown / JSON / JUnit / SARIF. `--baseline` is a ratchet (fail only on a drop). `--update-baseline` writes the file when the score improves. |
+| `compass diff` | Compare two scored JSON reports (Markdown for a PR comment, or JSON). |
+| `compass explain` | Why one control is the colour it is: question, verdict, applied checks, files, remediation. |
 | `compass serve` | Live localhost dashboard with a re-scan button. |
 | `compass verify` | Standalone tamper-evident audit-chain verification. |
 | `compass attest` | `generate` a signed attestation bundle; `verify` one offline. |
@@ -172,25 +180,44 @@ diffable, and re-runnable, so a governance posture can be reviewed in a
 pull request and enforced in CI:
 
 ```yaml
-# .github/workflows/governance.yml (excerpt)
-- run: compass report --out report --format html,junit,sarif --threshold 80
-  # exit 0 = at/above threshold · 1 = below · 2 = evidence integrity failure
-- uses: actions/upload-artifact@v4
-  if: always()
-  with:
-    name: compass-report
-    path: |
-      report.html
-      report.junit.xml
-      report.sarif
+# .github/workflows/governance.yml
+name: compass
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+jobs:
+  score:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: AperionAI/compass@compass-v0.6.0
+        with:
+          assessment: compass-assessment.yaml
+          baseline: compass-baseline.json
+```
+
+Or call the binary yourself:
+
+```yaml
+- run: compass report --out report --format html,junit,sarif,json --baseline compass-baseline.json
+  # with --baseline: exit 0 = hold/improve · 1 = dropped · 2 = evidence integrity failure
+  # without --baseline: --threshold (default 70) is the gate
+- run: compass diff compass-baseline.json report.json --format md
 ```
 
 CI exit codes:
 
-- **0** — overall score at or above `--threshold` (default 70).
-- **1** — below threshold.
+- **0** — score at or above `--threshold` (default 70), or — when
+  `--baseline` is set — at or above the committed baseline.
+- **1** — below threshold, or dropped below the baseline.
 - **2** — an evidence-integrity check failed (tampered audit chain or an
-  invalid agent credential). This takes precedence over the threshold.
+  invalid agent credential). This takes precedence over the threshold
+  and the baseline.
 
 ## Free tool vs. Smartflow
 
@@ -232,9 +259,9 @@ Remediation text in reports links to the governance patterns at
   assessment, and not a substitute for a notified body, counsel, or
   your regulator. The control catalogs are our reading of the
   frameworks; verdicts are conservative but opinionated.
-- **v1 scope.** EU AI Act + IMDA agentic today. NIST AI RMF and
-  document/PDF ingestion are fast-follows; PDF export is print-to-PDF
-  from the HTML.
+- **v1 scope.** EU AI Act + IMDA agentic today. NIST AI RMF is a
+  later catalog. Documents attach by path + SHA-256; Compass does not
+  parse PDFs. PDF export is print-to-PDF from the HTML.
 
 ## Development
 

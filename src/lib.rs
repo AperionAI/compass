@@ -14,9 +14,11 @@
 //!   inherit a peer's answer so one assessment scores against every framework.
 //! - [`scoring`] — combine answers + evidence into verdicts and a 0-100 score.
 //! - [`report`] — JSON / Markdown / HTML / JUnit / SARIF renderers.
+//! - [`diff`] — compare two scored JSON reports (PR comment / CI).
+//! - [`explain`] — why one control is the colour it is.
 //! - [`serve`] — a tiny std-only local dashboard server.
 //! - [`adapters`] — native-export → canonical-JSONL converters (OpenAI,
-//!   LiteLLM, Bedrock, CSV) so existing logs become usable evidence.
+//!   LiteLLM, Bedrock, Azure OpenAI, LangSmith, Anthropic, Vertex, CSV).
 //! - [`doctor`] — the evidence gap report: what can't be proven yet, and how
 //!   to gather it.
 //! - [`record`] — a std-only OpenAI-compatible recording proxy (http or
@@ -30,8 +32,10 @@ pub mod adapters;
 pub mod attest;
 pub mod catalog;
 pub mod crosswalk;
+pub mod diff;
 pub mod doctor;
 pub mod evidence;
+pub mod explain;
 pub mod questionnaire;
 pub mod record;
 pub mod report;

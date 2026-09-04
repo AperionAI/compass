@@ -88,13 +88,36 @@ Install:
   native answer from a mapped peer (`catalogs/crosswalk.yaml`). The
   scorecard note says so. NIST is still a later catalog.
 
-## v0.6 — next
+## v0.6 — shipped: evidence coverage + CI loop
 
-- **NIST AI RMF catalog** (GOVERN / MAP / MEASURE / MANAGE).
-- **MCP trust-registry check** — ingest an exported server allowlist.
-- **Emergency-stop evidence** — recognise kill-switch events in the chain.
-- **Configurable thresholds** in the assessment file.
-- **Non-interactive answers** — `compass assess --set control=yes`.
+- **[SHIPPED v0.6] Document attachments.** `ingest --doc <file> --for
+  <control>` stores the path and SHA-256. Compass does not parse the file.
+- **[SHIPPED v0.6] Evidence freshness.** Files older than 90 days (override
+  with `--freshness-days` / `freshness_days` in the assessment) cannot keep a
+  Pass; they drop to Warn.
+- **[SHIPPED v0.6] `record` capture quality.** `--redact bodies`,
+  `--upstream-ca`, Anthropic `/v1/messages` + SSE, T1/T2/T3 at capture.
+- **[SHIPPED v0.6] Adapters.** `--from azure-openai | langsmith | anthropic |
+  vertex`.
+- **[SHIPPED v0.6] MCP allowlist + kill-switch.** `--mcp-allowlist`; chain
+  events `emergency_stop`.
+- **[SHIPPED v0.6] Baseline ratchet.** `report --baseline compass-baseline.json`
+  fails only on a drop. `--update-baseline` writes the file when the score
+  improves. Integrity failure still exits 2.
+- **[SHIPPED v0.6] `compass diff old.json new.json`.** Markdown (PR comment)
+  or JSON.
+- **[SHIPPED v0.6] GitHub Action.** `uses: AperionAI/compass@compass-v0.6.0`
+  installs that tag's release binary, writes junit+sarif+html, uploads SARIF,
+  comments the diff on the PR. Pin `compass-v*` tags.
+- **[SHIPPED v0.6] `compass explain <control_id>`.** Question, verdict, applied
+  checks, files, remediation. `doctor --json` for the gap report.
+
+## v0.7 — next
+
+- **NIST AI RMF catalog** (GOVERN / MAP / MEASURE / MANAGE). Agent-specific
+  NIST content waits for the Q4 2026 profile.
+- Configurable thresholds in the assessment file.
+- Non-interactive answers — `compass assess --set control=yes`.
 - IMDA leftovers: deeper threat-modelling / taint, agentic-commerce
   protocols (ACP, AP2).
 - Crosswalk coverage for NIST once that catalog exists.

@@ -73,6 +73,13 @@ pub enum AutoCheck {
     /// Field-presence stats over exported request logs (identity, risk tier,
     /// compliance fields present or missing).
     LoggingCompleteness,
+    /// A document was attached for this control and its SHA-256 still matches.
+    DocumentAttached,
+    /// Observed MCP servers are on an ingested allowlist (denials of
+    /// unlisted servers also count).
+    McpAllowlist,
+    /// Kill-switch / emergency-stop events are present in the audit chain.
+    EmergencyStop,
 }
 
 impl AutoCheck {
@@ -83,6 +90,9 @@ impl AutoCheck {
             AutoCheck::ActionRiskCoverage => "action_risk_coverage",
             AutoCheck::AgentIdentity => "agent_identity",
             AutoCheck::LoggingCompleteness => "logging_completeness",
+            AutoCheck::DocumentAttached => "document_attached",
+            AutoCheck::McpAllowlist => "mcp_allowlist",
+            AutoCheck::EmergencyStop => "emergency_stop",
         }
     }
 }

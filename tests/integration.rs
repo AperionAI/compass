@@ -328,6 +328,222 @@ fn doctor_reports_gaps_on_bare_assessment() {
     assert!(text.contains("playbook:"));
 }
 
+#[test]
+fn ingest_doc_covers_annex_iv() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = dir.path().join("annex-iv.txt");
+    std::fs::write(&doc, "technical file for art 11").unwrap();
+    let assessment = dir.path().join("a.yaml");
+    let st = Command::new(BIN)
+        .args([
+            "ingest",
+            "--assessment",
+            assessment.to_str().unwrap(),
+            "--framework",
+            "eu-ai-act",
+            "--doc",
+            doc.to_str().unwrap(),
+            "--for",
+            "art_11_annex_iv",
+        ])
+        .status()
+        .unwrap();
+    assert!(st.success());
+
+    let out = dir.path().join("report.json");
+    let st = Command::new(BIN)
+        .args([
+            "report",
+            "--assessment",
+            assessment.to_str().unwrap(),
+            "--out",
+            out.to_str().unwrap(),
+            "--format",
+            "json",
+            "--no-exit-code",
+        ])
+        .status()
+        .unwrap();
+    assert!(st.success());
+    let body = std::fs::read_to_string(&out).unwrap();
+    assert!(body.contains("document_attached"), "report: {body}");
+    assert!(body.contains("hash verified") || body.contains("Document attached"));
+}
+
+#[test]
+fn baseline_create_hold_and_drop() {
+    let dir = tempfile::tempdir().unwrap();
+    let baseline = dir.path().join("baseline.json");
+
+    // Missing baseline without --update-baseline is an error.
+    let missing = Command::new(BIN)
+        .args([
+            "report",
+            "--assessment",
+            DEMO_ASSESSMENT,
+            "--out",
+            dir.path().join("discard.json").to_str().unwrap(),
+            "--format",
+            "json",
+            "--baseline",
+            baseline.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(missing.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&missing.stderr);
+    assert!(err.contains("not found"), "stderr: {err}");
+
+    let created = Command::new(BIN)
+        .args([
+            "report",
+            "--assessment",
+            DEMO_ASSESSMENT,
+            "--out",
+            dir.path().join("demo.json").to_str().unwrap(),
+            "--format",
+            "json",
+            "--baseline",
+            baseline.to_str().unwrap(),
+            "--update-baseline",
+        ])
+        .status()
+        .unwrap();
+    assert_eq!(created.code(), Some(scoring::EXIT_PASS));
+    assert!(baseline.exists());
+
+    // Same assessment against that baseline holds.
+    let hold = Command::new(BIN)
+        .args([
+            "report",
+            "--assessment",
+            DEMO_ASSESSMENT,
+            "--out",
+            dir.path().join("hold.json").to_str().unwrap(),
+            "--format",
+            "json",
+            "--baseline",
+            baseline.to_str().unwrap(),
+        ])
+        .status()
+        .unwrap();
+    assert_eq!(hold.code(), Some(scoring::EXIT_PASS));
+
+    // Empty scaffold scores lower → drop.
+    let empty = dir.path().join("empty.yaml");
+    let st = Command::new(BIN)
+        .args([
+            "assess",
+            "--defaults",
+            "--assessment",
+            empty.to_str().unwrap(),
+            "--framework",
+            "eu-ai-act",
+        ])
+        .status()
+        .unwrap();
+    assert!(st.success());
+    let drop = Command::new(BIN)
+        .args([
+            "report",
+            "--assessment",
+            empty.to_str().unwrap(),
+            "--out",
+            dir.path().join("drop.json").to_str().unwrap(),
+            "--format",
+            "json",
+            "--baseline",
+            baseline.to_str().unwrap(),
+        ])
+        .status()
+        .unwrap();
+    assert_eq!(drop.code(), Some(scoring::EXIT_BELOW_THRESHOLD));
+}
+
+#[test]
+fn diff_markdown_between_two_reports() {
+    let dir = tempfile::tempdir().unwrap();
+    let old = dir.path().join("old.json");
+    let new = dir.path().join("new.json");
+
+    let empty = dir.path().join("empty.yaml");
+    let st = Command::new(BIN)
+        .args([
+            "assess",
+            "--defaults",
+            "--assessment",
+            empty.to_str().unwrap(),
+            "--framework",
+            "eu-ai-act,imda",
+        ])
+        .status()
+        .unwrap();
+    assert!(st.success());
+
+    for (assessment, out) in [
+        (empty.to_str().unwrap(), old.to_str().unwrap()),
+        (DEMO_ASSESSMENT, new.to_str().unwrap()),
+    ] {
+        let st = Command::new(BIN)
+            .args([
+                "report",
+                "--assessment",
+                assessment,
+                "--out",
+                out,
+                "--format",
+                "json",
+                "--no-exit-code",
+            ])
+            .status()
+            .unwrap();
+        assert!(st.success());
+    }
+
+    let output = Command::new(BIN)
+        .args(["diff", old.to_str().unwrap(), new.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let md = String::from_utf8_lossy(&output.stdout);
+    assert!(md.contains("## Compass"), "diff md: {md}");
+    assert!(md.contains("Score"), "diff md: {md}");
+}
+
+#[test]
+fn explain_prints_verdict_for_bundled_control() {
+    let output = Command::new(BIN)
+        .args([
+            "explain",
+            "art_12_traceability",
+            "--assessment",
+            DEMO_ASSESSMENT,
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains("art_12_traceability"));
+    assert!(text.contains("Verdict:"));
+}
+
+#[test]
+fn doctor_json_is_machine_readable() {
+    let output = Command::new(BIN)
+        .args(["doctor", "--assessment", DEMO_ASSESSMENT, "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(v.get("checks").and_then(|c| c.as_array()).is_some());
+    assert!(v.get("stale").is_some());
+    assert!(v.get("documents").is_some());
+}
+
 fn tmp_out() -> String {
     let mut f = tempfile::NamedTempFile::new().unwrap();
     // Ensure a .json suffix so single-format honours the path as-is.

@@ -187,6 +187,7 @@ fn gen_assessment() {
         credentials: Some("demo/credentials.jsonl".into()),
         jwks: Some("demo/jwks.json".into()),
         generic: None,
+        ..Default::default()
     };
 
     a.save("demo/compass-assessment.yaml").unwrap();

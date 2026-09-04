@@ -22,7 +22,8 @@
 use crate::catalog::{Catalog, Verdict};
 use crate::evidence::{CheckStatus, EvidenceBundle};
 use crate::questionnaire::{Answer, Assessment};
-use serde::Serialize;
+use anyhow::Context;
+use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_PASS_THRESHOLD: f64 = 70.0;
 
@@ -31,14 +32,14 @@ pub const EXIT_PASS: i32 = 0;
 pub const EXIT_BELOW_THRESHOLD: i32 = 1;
 pub const EXIT_INTEGRITY_FAILURE: i32 = 2;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppliedCheck {
     pub check: String,
     pub status: CheckStatus,
     pub summary: String,
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VerdictCounts {
     pub exists: u64,
     pub partial: u64,
@@ -61,7 +62,7 @@ impl VerdictCounts {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ControlScore {
     pub control_id: String,
     pub title: String,
@@ -72,16 +73,16 @@ pub struct ControlScore {
     pub verdict: Verdict,
     /// 1.0 / 0.5 / 0.0, or `None` when Not Applicable.
     pub score: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
     pub applied_checks: Vec<AppliedCheck>,
     pub evidence_backed: bool,
     pub contradicted: bool,
     /// Populated whenever the verdict is not `Exists` / `NotApplicable`.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remediation: Option<String>,
     /// ISO date the obligation takes effect, copied from the catalog.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effective_date: Option<String>,
     /// True when the obligation is already binding (or has no date).
     pub applies_now: bool,
@@ -89,24 +90,24 @@ pub struct ControlScore {
     pub timeline_label: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DimensionScore {
     pub id: String,
     pub title: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub score: f64,
     pub counts: VerdictCounts,
     pub controls: Vec<ControlScore>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FrameworkScore {
     pub framework: String,
     pub name: String,
     pub version: String,
     pub source: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub score: f64,
     pub label: String,
@@ -114,12 +115,12 @@ pub struct FrameworkScore {
     pub dimensions: Vec<DimensionScore>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Scorecard {
     pub generated_at: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub organization: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_name: Option<String>,
     pub tool: String,
     pub tool_version: String,
@@ -132,6 +133,39 @@ pub struct Scorecard {
     pub passed: bool,
     pub integrity_failure: bool,
     pub recommended_exit_code: i32,
+}
+
+impl Scorecard {
+    /// Load a previously written JSON report.
+    pub fn from_json_path(path: &str) -> anyhow::Result<Scorecard> {
+        let raw =
+            std::fs::read_to_string(path).with_context(|| format!("reading scorecard {path}"))?;
+        serde_json::from_str(&raw).with_context(|| format!("parsing scorecard JSON {path}"))
+    }
+
+    /// Rounded overall score used for baseline / CI comparison.
+    pub fn score_int(&self) -> i64 {
+        self.overall_score.round() as i64
+    }
+
+    pub fn control(&self, control_id: &str) -> Option<(&str, &ControlScore)> {
+        for fw in &self.frameworks {
+            for dim in &fw.dimensions {
+                if let Some(c) = dim.controls.iter().find(|c| c.control_id == control_id) {
+                    return Some((fw.framework.as_str(), c));
+                }
+            }
+        }
+        None
+    }
+
+    pub fn iter_controls(&self) -> impl Iterator<Item = (&str, &ControlScore)> {
+        self.frameworks.iter().flat_map(|fw| {
+            fw.dimensions
+                .iter()
+                .flat_map(move |d| d.controls.iter().map(move |c| (fw.framework.as_str(), c)))
+        })
+    }
 }
 
 /// Weighted 0-100 score over a set of control scores (NA excluded).
@@ -188,7 +222,34 @@ fn score_control(
     let mut any_pass = false;
 
     for check in &control.auto_checks {
-        if let Some(outcome) = evidence.outcome(*check) {
+        let outcome = if *check == crate::catalog::AutoCheck::DocumentAttached {
+            evidence.documents.get(&control.id)
+        } else {
+            evidence.outcome(*check)
+        };
+        if let Some(outcome) = outcome {
+            applied.push(AppliedCheck {
+                check: outcome.check.clone(),
+                status: outcome.status,
+                summary: outcome.summary.clone(),
+            });
+            match outcome.status {
+                CheckStatus::Fail => any_fail = true,
+                CheckStatus::Warn => any_warn = true,
+                CheckStatus::Pass => any_pass = true,
+                CheckStatus::NotRun => {}
+            }
+        }
+    }
+
+    // Documents attached with `--for` this control still count even when the
+    // catalog does not list `document_attached` (that's how paper controls
+    // become checkable without a catalog edit).
+    if !control
+        .auto_checks
+        .contains(&crate::catalog::AutoCheck::DocumentAttached)
+    {
+        if let Some(outcome) = evidence.documents.get(&control.id) {
             applied.push(AppliedCheck {
                 check: outcome.check.clone(),
                 status: outcome.status,

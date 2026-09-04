@@ -62,6 +62,7 @@ controls:
       system across the AI system's lifecycle (identify, estimate, evaluate,
       mitigate)?
     weight: 2
+    auto_checks: [document_attached]
     remediation: >
       Stand up a lifecycle risk-management process with a written risk register.
       A runtime policy layer (per-route/per-key policy graph with tiered rules)
@@ -135,6 +136,7 @@ controls:
       compliance per Annex IV (system description, development, monitoring,
       performance, risk management)?
     weight: 2
+    auto_checks: [document_attached]
     remediation: >
       Maintain a living technical file. An AI inventory (every provider, model,
       and route in use) plus a signed bill-of-materials keeps Annex IV current
@@ -210,7 +212,7 @@ controls:
       Can an authorised human intervene in, override, or halt the system's
       operation (including a "stop" that is honoured mid-execution)?
     weight: 2
-    auto_checks: [action_risk_coverage]
+    auto_checks: [action_risk_coverage, emergency_stop]
     remediation: >
       Provide a kill switch / emergency stop that takes the system offline or
       read-only, and hold irreversible (T3) actions for approval so intervention
@@ -268,6 +270,7 @@ controls:
       Do you operate a quality-management system ensuring compliance is
       maintained throughout the lifecycle (responsibilities, procedures,
       testing, corrective action)?
+    auto_checks: [document_attached]
     remediation: >
       Run a repeatable QMS: scheduled rescans (PII, multi-turn attacks,
       anomalies), framework evidence reports, and a findings pipeline that
@@ -411,6 +414,7 @@ controls:
       available to the AI Office and national competent authorities on request?
     guidance: Answer N/A if you are not a GPAI provider.
     weight: 2
+    auto_checks: [document_attached]
     remediation: >
       Maintain a living technical file for the GPAI model (architecture,
       training data categories, compute, evaluation). Have a way to produce
