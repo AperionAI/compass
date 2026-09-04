@@ -305,12 +305,24 @@ fn run(cli: Cli) -> Result<i32> {
         Command::Attest(a) => cmd_attest(a),
         Command::Frameworks => {
             println!("Bundled frameworks:");
+            let as_of = chrono::Utc::now().date_naive();
             for (id, aliases) in BUNDLED_FRAMEWORKS {
                 let cat = catalog::bundled(id)?;
+                let binding = cat.controls.iter().filter(|c| c.applies_now(as_of)).count();
+                let prepare = cat.controls.len().saturating_sub(binding);
+                let timeline = if prepare == 0 {
+                    format!("{} controls", cat.controls.len())
+                } else {
+                    format!(
+                        "{} controls ({} binding now, {} prepare later)",
+                        cat.controls.len(),
+                        binding,
+                        prepare
+                    )
+                };
                 println!(
-                    "  {id:<12} {} — {} controls (aliases: {})",
+                    "  {id:<12} {} — {timeline} (aliases: {})",
                     cat.name,
-                    cat.controls.len(),
                     aliases.join(", ")
                 );
             }

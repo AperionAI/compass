@@ -1,5 +1,5 @@
 version: 1
-generated_at: 2026-07-12T23:44:00.595220+00:00
+generated_at: 2026-09-04T16:02:10.561821+00:00
 organization: Acme Financial (demo)
 system_name: Client-onboarding agent
 frameworks:
@@ -45,6 +45,22 @@ frameworks:
     answer: partial
   - control_id: art_79_incident_reporting
     answer: no
+  - control_id: art_50_disclosure
+    answer: yes
+  - control_id: art_50_synthetic_marking
+    answer: partial
+  - control_id: art_50_deepfake
+    answer: yes
+  - control_id: art_51_gpai_scope
+    answer: yes
+  - control_id: art_53_documentation
+    answer: yes
+  - control_id: art_53_copyright
+    answer: no
+  - control_id: art_53_training_summary
+    answer: yes
+  - control_id: art_55_systemic
+    answer: yes
 - framework: imda
   answers:
   - control_id: identity_verifiable
@@ -65,6 +81,10 @@ frameworks:
     answer: yes
   - control_id: blast_radius
     answer: yes
+  - control_id: multi_agent_risk
+    answer: yes
+  - control_id: value_chain_role
+    answer: partial
   - control_id: approval_checkpoints
     answer: yes
   - control_id: approval_context
@@ -96,6 +116,8 @@ frameworks:
   - control_id: continuous_monitoring
     answer: partial
   - control_id: change_management
+    answer: yes
+  - control_id: memory_poisoning
     answer: yes
   - control_id: inform_users_actions
     answer: no

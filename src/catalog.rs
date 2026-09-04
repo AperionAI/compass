@@ -14,6 +14,7 @@
 //! their own catalog file to extend or override.
 
 use anyhow::{anyhow, Context, Result};
+use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
 /// Unified conformance verdict for a control (and rolled up per dimension /
@@ -124,6 +125,36 @@ pub struct Control {
     pub auto_checks: Vec<AutoCheck>,
     /// What to do when this control is not fully met.
     pub remediation: String,
+    /// ISO date (`YYYY-MM-DD`) the obligation takes effect. Missing means
+    /// already in force (frameworks that aren't statutes, or undated items).
+    #[serde(default)]
+    pub effective_date: Option<String>,
+}
+
+impl Control {
+    /// Parse `effective_date` as `YYYY-MM-DD`.
+    pub fn effective_on(&self) -> Option<NaiveDate> {
+        self.effective_date
+            .as_deref()
+            .and_then(|s| NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d").ok())
+    }
+
+    /// True when the control is already binding on `as_of` (or has no date).
+    pub fn applies_now(&self, as_of: NaiveDate) -> bool {
+        match self.effective_on() {
+            None => true,
+            Some(d) => d <= as_of,
+        }
+    }
+
+    /// `"Binding now"` or `"Prepare by 02 Dec 2027"`.
+    pub fn timeline_label(&self, as_of: NaiveDate) -> String {
+        match self.effective_on() {
+            None => "Binding now".to_string(),
+            Some(d) if d <= as_of => "Binding now".to_string(),
+            Some(d) => format!("Prepare by {}", d.format("%d %b %Y")),
+        }
+    }
 }
 
 /// One framework's full control catalog.
@@ -178,6 +209,14 @@ impl Catalog {
                     c.id,
                     c.dimension
                 ));
+            }
+            if let Some(d) = &c.effective_date {
+                if NaiveDate::parse_from_str(d.trim(), "%Y-%m-%d").is_err() {
+                    return Err(anyhow!(
+                        "control '{}' has invalid effective_date '{d}' (want YYYY-MM-DD)",
+                        c.id
+                    ));
+                }
             }
         }
         Ok(())
@@ -269,10 +308,68 @@ mod tests {
         let eu = bundled("eu-ai-act").expect("eu catalog parses");
         assert_eq!(eu.framework, "eu-ai-act");
         assert!(eu.controls.len() >= 10, "eu should have >=10 controls");
+        for c in &eu.controls {
+            assert!(
+                c.effective_date.is_some(),
+                "EU control '{}' is missing effective_date",
+                c.id
+            );
+        }
 
         let imda = bundled("imda").expect("imda catalog parses");
         assert_eq!(imda.framework, "imda");
         assert!(imda.controls.len() >= 10, "imda should have >=10 controls");
+    }
+
+    #[test]
+    fn eu_art_50_and_gpai_are_binding_high_risk_deferred() {
+        let eu = bundled("eu-ai-act").unwrap();
+        let as_of = NaiveDate::from_ymd_opt(2026, 9, 4).unwrap();
+
+        for id in [
+            "art_5_prohibited",
+            "art_50_disclosure",
+            "art_50_synthetic_marking",
+            "art_50_deepfake",
+            "art_51_gpai_scope",
+            "art_53_documentation",
+            "art_53_copyright",
+            "art_53_training_summary",
+            "art_55_systemic",
+        ] {
+            let c = eu
+                .control(id)
+                .unwrap_or_else(|| panic!("missing EU control {id}"));
+            assert!(c.applies_now(as_of), "{id} should be binding on {as_of}");
+        }
+
+        let art9 = eu.control("art_9_risk_system").expect("art_9");
+        assert!(!art9.applies_now(as_of), "Art. 9 is deferred to Dec 2027");
+        assert!(
+            art9.timeline_label(as_of).contains("2027"),
+            "got {}",
+            art9.timeline_label(as_of)
+        );
+
+        let incident = eu
+            .control("art_79_incident_reporting")
+            .expect("stable incident-reporting id");
+        assert!(
+            incident.framework_ref.contains("73"),
+            "incident control should cite Art. 73, got {}",
+            incident.framework_ref
+        );
+    }
+
+    #[test]
+    fn imda_v15_delta_controls_exist() {
+        let imda = bundled("imda").unwrap();
+        for id in ["multi_agent_risk", "memory_poisoning", "value_chain_role"] {
+            assert!(
+                imda.control(id).is_some(),
+                "IMDA v1.5 delta control '{id}' missing"
+            );
+        }
     }
 
     #[test]

@@ -35,7 +35,7 @@ at files you already have:
   against a public key / JWKS (no shared secret, no running gateway).
 - **Logging completeness** — field-presence stats over your request
   logs (identity, risk tier, decisions, perimeter).
-- **Signed attestation (v0.3)** — seal the scored posture, evidence-check
+- **Signed attestation** — seal the scored posture, evidence-check
   outcomes, and an anchor of the audit-chain tail into one Ed25519-signed
   bundle that an auditor or customer can verify **offline**, without
   trusting you or touching your gateway.
@@ -71,7 +71,7 @@ compass report --out report.html --format html,md,json
 # ...or explore live in the browser
 compass serve --port 8787
 
-# 4. (v0.3) Seal the result into a signed, offline-verifiable attestation
+# 4. Seal the result into a signed, offline-verifiable attestation
 compass attest generate --out compass-attestation.json
 compass attest verify   --bundle compass-attestation.json   # anyone, offline
 ```
@@ -79,7 +79,7 @@ compass attest verify   --bundle compass-attestation.json   # anyone, offline
 No evidence files? A questionnaire-only run still produces a full
 report — those controls are simply marked "self-attested".
 
-### Signed attestation bundles (v0.3)
+### Signed attestation bundles
 
 A report is something you produce; an **attestation** is something an
 auditor or customer can *verify without trusting you*. `compass attest
@@ -136,8 +136,8 @@ compass verify --chain demo/chain.jsonl --chain-hmac-key file:demo/chain.key
 # Homebrew (macOS / Linux)
 brew install AperionAI/tap/aperion-compass
 
-# Cargo
-cargo install aperion-compass
+# GitHub release (any OS)
+# https://github.com/AperionAI/compass/releases — unpack `compass` onto your PATH
 
 # Docker
 docker run --rm -v "$PWD:/work" -w /work \
@@ -148,6 +148,9 @@ git clone https://github.com/AperionAI/compass && cd compass
 cargo build --release      # ./target/release/compass
 ```
 
+The crate is not published on crates.io. Build from this repo if you
+want to compile it yourself.
+
 ## Commands
 
 | Command | What it does |
@@ -156,9 +159,10 @@ cargo build --release      # ./target/release/compass
 | `compass ingest` | Register evidence files; or `--from openai\|litellm\|bedrock\|csv\|csv-approvals --input <export>` to convert a native export into evidence first. |
 | `compass doctor` | Show which automated checks have evidence and, for every gap, the exact step to close it. |
 | `compass record` | Localhost OpenAI-compatible proxy that captures a tamper-evident log from live traffic. |
-| `compass report` | Score answers + evidence; write HTML / Markdown / JSON. |
+| `compass report` | Score answers + evidence; write HTML / Markdown / JSON. Binding-now vs prepare-by dates show on each EU control. |
 | `compass serve` | Live localhost dashboard with a re-scan button. |
 | `compass verify` | Standalone tamper-evident audit-chain verification. |
+| `compass attest` | `generate` a signed attestation bundle; `verify` one offline. |
 | `compass frameworks` | List the bundled frameworks and control counts. |
 
 ## Assessment as code
@@ -188,7 +192,7 @@ concepts, same evidence formats — one measures, the other enforces.
 
 | | **aperion-compass** (this) | **Smartflow** |
 |---|---|---|
-| Cost | Free tier, binary-only | Commercial |
+| Cost | Free to run | Commercial |
 | Runs | Locally, offline, from files | In your request path (gateway) |
 | Mode | Point-in-time snapshot | Continuous, live |
 | Identity | Verifies exported credentials | Issues + validates on the hot path |
@@ -239,5 +243,6 @@ dashboard).
 
 ## License
 
-Proprietary — binaries and images only, no source distributed. See
-[LICENSE](LICENSE) (Aperion AI Compass Binary License Agreement).
+Free to run. Source is inspectable in this repo. Compiled binaries and
+images are under the Binary License Agreement — this is not an
+open-source license. See [LICENSE](LICENSE).

@@ -25,21 +25,18 @@ force three days later. The load-bearing facts for assessments:
 - Prohibited practices (Art. 5) have applied since February 2025.
 
 Implication: the controls most urgent for a user running Compass in
-late 2026 are Art. 5, Art. 50, and GPAI — of which v0.1 covers only
-Art. 5. The high-risk articles (9–15, 17, 26) remain correct and
-useful as preparation for Dec 2027, but the catalog should say so.
+late 2026 are Art. 5, Art. 50, and GPAI. **v0.4 covers those**, and
+marks Annex III high-risk articles (9–15, 17, 26, 72, 73) as
+"prepare by 2 Dec 2027" instead of implying they are due today.
 
-**IMDA MGF for Agentic AI.** v0.1's catalog is seeded from **v1.5
+**IMDA MGF for Agentic AI.** Catalog seeded from **v1.5
 (published 20 May 2026, updated 5 June 2026)** — confirmed still the
-current edition. Spot-checked our control anchors against the v1.5
-text: identity (unique/accounted/differentiated/catalogued),
-authorization (scoped, least-privilege, bounded-by-human), oversight
-effectiveness (override rate, response time, outlier reviewers), MCP
-whitelisting + sandboxed code execution, tamper-evident logging, and
-change management all match. v1.5 topics we don't yet cover: systemic
-and multi-agent risks, memory poisoning, threat modelling / taint
-tracing (per CSA's addendum), the platform-provider vs system-provider
-value-chain split, and agentic-commerce protocols (ACP, AP2).
+current edition. Identity, authorization, oversight effectiveness, MCP
+whitelisting, sandboxed execution, tamper-evident logging, and change
+management match. **v0.4 adds** systemic/multi-agent risk, memory
+poisoning, and the platform-provider vs system-provider split. Still
+open: threat-modelling depth beyond `multi_hop_taint`, and
+agentic-commerce protocols (ACP, AP2).
 
 **NIST.** AI RMF 1.0 is under revision; the Generative AI Profile
 (NIST-AI-600-1) is current. The Cyber AI Profile (IR 8596) is in
@@ -52,31 +49,56 @@ wait for the Q4 2026 profile.
 
 ---
 
-## v0.2 — current-obligation coverage + CI depth
+## v0.4 — shipped: current-obligation catalog + install funnel
 
-Catalog work (the content is the product):
+Catalog (the content is the product):
 
-- **EU: add an "Applies now" dimension** — Art. 50 transparency
-  controls (disclosure, synthetic-content marking, deepfake labeling)
-  and GPAI provider obligations (Arts. 51–55: technical documentation,
-  copyright policy, training-content summary). These are the
-  obligations binding in 2026 while high-risk is deferred.
-- **EU: encode the Omnibus timeline** — per-control `effective_date`
-  metadata so reports can say "binding now" vs "prepare by Dec 2027 /
-  Aug 2028" instead of implying everything is due today.
-- **EU: correct the incident-reporting reference** to Art. 73
-  (serious-incident reporting), keeping Art. 79 as the related
-  market-surveillance procedure. Control id stays stable so existing
-  assessment files keep their answers.
-- **IMDA: v1.5 delta controls** — systemic/multi-agent risk, memory
-  poisoning, threat modelling & taint tracing, value-chain role
-  clarity (platform vs system provider), agentic-commerce protocols.
-- **NIST AI RMF catalog** (GOVERN / MAP / MEASURE / MANAGE) — the
-  planned fast-follow from v0.1.
+- **[SHIPPED v0.4] EU Art. 50** — disclosure, synthetic-content marking,
+  deepfake / emotion-recognition labelling. Binding from 2 Aug 2026.
+- **[SHIPPED v0.4] GPAI Arts. 51–55** — provider scope, technical
+  documentation, copyright policy, training-content summary, systemic-risk
+  extras. Answer N/A if you are not a GPAI provider.
+- **[SHIPPED v0.4] `effective_date` on every EU control** — reports badge
+  "Binding now" vs "Prepare by 02 Dec 2027". Deferred controls stay in
+  the score; the badge is the honesty layer.
+- **[SHIPPED v0.4] Incident reporting retargeted to Art. 73.** Control
+  id `art_79_incident_reporting` is unchanged so existing assessment files
+  keep their answers. Art. 79 stays the related market-surveillance
+  procedure in the guidance.
+- **[SHIPPED v0.4] IMDA v1.5 delta** — `multi_agent_risk`,
+  `memory_poisoning`, `value_chain_role`.
 
-Getting the evidence in the first place (the biggest v0.1 gap —
-most teams don't have governance-grade logs lying around, and
-telling them "feed us JSONL" isn't a methodology):
+Install:
+
+- Homebrew formula is rendered by `.github/workflows/release.yml` into
+  `AperionAI/homebrew-tap` on each `compass-v*` tag (`brew install
+  AperionAI/tap/aperion-compass`). The crate is **not** on crates.io;
+  README no longer advertises `cargo install`.
+- `compass attest` is in the commands table. GitHub about / README
+  license one-liner: free to run, inspectable source, binary license.
+
+## v0.5 — HTTPS record, CI output, crosswalk
+
+Still from the earlier plan, next up:
+
+- **`compass record` HTTPS + SSE** — today it forwards to http
+  upstreams only. Direct-HTTPS and SSE pass-through so a hosted API
+  can be recorded without a local LiteLLM in front.
+- **CI-native output** — JUnit XML and SARIF so `compass report`
+  annotates PRs; a reference GitHub Action.
+- **Framework crosswalk** — map equivalent controls across EU / IMDA /
+  NIST so one answered assessment scores against every catalog.
+- **NIST AI RMF catalog** (GOVERN / MAP / MEASURE / MANAGE).
+- **MCP trust-registry check** — ingest an exported server allowlist.
+- **Emergency-stop evidence** — recognise kill-switch events in the chain.
+- **Configurable thresholds** in the assessment file.
+- **Non-interactive answers** — `compass assess --set control=yes`.
+- IMDA leftovers: deeper threat-modelling / taint, agentic-commerce
+  protocols (ACP, AP2).
+
+## v0.2 / v0.3 — already shipped (evidence path)
+
+Getting the evidence in the first place:
 
 - **[SHIPPED v0.2] Evidence playbooks** — per-platform guides in
   `docs/evidence/` for exporting usable logs from the systems people
@@ -91,52 +113,21 @@ telling them "feed us JSONL" isn't a methodology):
 - **[SHIPPED v0.2] `compass doctor`** — evidence gap report: which
   checks have evidence, and for every gap the exact remediation step +
   playbook link. Gaps are findings, not failures.
+- **[SHIPPED v0.2] `compass record`** — localhost OpenAI-compatible
+  proxy. Point your SDK's `base_url` at it and every call is written as
+  hash-chained JSONL.
+- **[SHIPPED v0.3] Signed attestation** — `compass attest generate` /
+  `verify`.
 
-Evidence + CI:
+Later (unchanged):
 
-- **MCP trust-registry check** — ingest an exported server allowlist
-  and report calls to unlisted servers (IMDA "whitelist trusted
-  servers" gets objective evidence instead of self-attestation).
-- **Emergency-stop evidence** — recognise kill-switch activation
-  events in the chain and credit the interruption-authority controls.
-- **Configurable thresholds** — per-check thresholds (override-rate
-  floor, latency floor, sigma) in the assessment file instead of
-  hard-coded defaults.
-- **CI-native output** — JUnit XML and SARIF renderers so `compass
-  report` results annotate PRs; a reference GitHub Action.
-- **Non-interactive answers** — `compass assess --set control=yes`
-  for scripted runs; `--only framework` and `--resume` for long
-  questionnaires.
-
-## v0.3 — crosswalks, trends, and richer evidence
-
-- **[SHIPPED v0.2] `compass record`** — solves the cold-start problem
-  for teams with no logs: a std-only localhost proxy speaking the
-  OpenAI-compatible API. Point your SDK's `base_url` at it and every
-  call is written as hash-chained, Compass-ready JSONL that doubles as
-  the audit chain and the request log. Local only, nothing leaves the
-  machine. (Follow-ups: direct-HTTPS upstreams and SSE streaming
-  pass-through; today it forwards to http upstreams.)
 - **Approval-system adapters** — deeper Jira and ServiceNow export
   converters building on the v0.2 CSV bridge.
-- **Framework crosswalk** — map equivalent controls across EU / IMDA /
-  NIST so one answered assessment scores against every catalog
-  ("answer once, score everywhere"), with per-framework overrides.
-- **Assessment diffing & trend** — `compass diff a.yaml b.yaml` and a
-  score-over-time view in the dashboard; the quarterly-review story.
-- **Signed reports** — optionally Ed25519-sign the scorecard JSON so a
-  report is itself tamper-evident and a third party can verify who
-  produced it (same primitive we already verify credentials with).
-- **Document evidence attachments** — reference policy docs / PDFs per
-  control (hash + path recorded in the assessment; content stays
-  local), so the report carries an evidence inventory, not just notes.
-- **ISO/IEC 42001 catalog** — the AI-management-system standard many
-  buyers ask about alongside the EU AI Act; pairs with the crosswalk.
-- **Editable serve mode** — change answers in the browser and save
-  back to the assessment file (localhost only, same zero-server-trust
-  posture).
-- **NIST agent profile watch** — catalog the AI Agent Interoperability
-  Profile when it lands (expected Q4 2026); COSAiS agent overlays when
+- **Assessment diffing & trend** — `compass diff a.yaml b.yaml`.
+- **Document evidence attachments** — hash + path recorded locally.
+- **ISO/IEC 42001 catalog.**
+- **Editable serve mode.**
+- **NIST agent profile watch** — Q4 2026 profile; COSAiS overlays when
   final (2027).
 
 ## Out of scope (unchanged from v0.1)

@@ -80,6 +80,13 @@ pub struct ControlScore {
     /// Populated whenever the verdict is not `Exists` / `NotApplicable`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remediation: Option<String>,
+    /// ISO date the obligation takes effect, copied from the catalog.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effective_date: Option<String>,
+    /// True when the obligation is already binding (or has no date).
+    pub applies_now: bool,
+    /// `"Binding now"` or `"Prepare by 02 Dec 2027"`.
+    pub timeline_label: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -171,6 +178,7 @@ fn score_control(
     answer: Answer,
     note: Option<String>,
     evidence: &EvidenceBundle,
+    as_of: chrono::NaiveDate,
 ) -> ControlScore {
     let base = answer.to_verdict();
     let mut verdict = base;
@@ -235,6 +243,9 @@ fn score_control(
         evidence_backed,
         contradicted,
         remediation,
+        effective_date: control.effective_date.clone(),
+        applies_now: control.applies_now(as_of),
+        timeline_label: control.timeline_label(as_of),
     }
 }
 
@@ -249,6 +260,7 @@ pub fn score(
     let mut framework_scores = Vec::new();
     let mut overall_counts = VerdictCounts::default();
     let mut all_controls_for_overall: Vec<ControlScore> = Vec::new();
+    let as_of = chrono::Utc::now().date_naive();
 
     for cat in catalogs {
         let fa = assessment.framework(&cat.framework);
@@ -264,7 +276,7 @@ pub fn score(
                     .and_then(|f| f.answer_for(&control.id))
                     .map(|a| (a.answer, a.note.clone()))
                     .unwrap_or((Answer::Unanswered, None));
-                let cs = score_control(control, answer, note, evidence);
+                let cs = score_control(control, answer, note, evidence, as_of);
                 dim_counts.tally(cs.verdict, cs.answer);
                 fw_counts.tally(cs.verdict, cs.answer);
                 overall_counts.tally(cs.verdict, cs.answer);
@@ -435,5 +447,34 @@ mod tests {
             .unwrap();
         assert_eq!(tamper_control.verdict, Verdict::Partial);
         assert!(tamper_control.evidence_backed);
+    }
+
+    #[test]
+    fn scorecard_carries_timeline_on_eu_controls() {
+        let cats = catalog::load_selection(&["eu".into()]).unwrap();
+        let a = Assessment::scaffold(&cats);
+        let sc = score(&cats, &a, &EvidenceBundle::default(), 70.0);
+        let art50 = sc
+            .frameworks
+            .iter()
+            .flat_map(|f| f.dimensions.iter())
+            .flat_map(|d| d.controls.iter())
+            .find(|c| c.control_id == "art_50_disclosure")
+            .expect("art_50_disclosure scored");
+        assert!(art50.applies_now);
+        assert_eq!(art50.timeline_label, "Binding now");
+        let art9 = sc
+            .frameworks
+            .iter()
+            .flat_map(|f| f.dimensions.iter())
+            .flat_map(|d| d.controls.iter())
+            .find(|c| c.control_id == "art_9_risk_system")
+            .expect("art_9");
+        assert!(!art9.applies_now);
+        assert!(
+            art9.timeline_label.contains("2027"),
+            "got {}",
+            art9.timeline_label
+        );
     }
 }

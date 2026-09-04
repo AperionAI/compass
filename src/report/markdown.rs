@@ -67,6 +67,36 @@ pub fn render(card: &Scorecard) -> String {
     .ok();
     writeln!(s).ok();
 
+    let due_now: Vec<&ControlScore> = card
+        .frameworks
+        .iter()
+        .flat_map(|f| f.dimensions.iter())
+        .flat_map(|d| d.controls.iter())
+        .filter(|c| c.applies_now && c.remediation.is_some())
+        .collect();
+    if !due_now.is_empty() {
+        writeln!(s, "## Binding now — {} open item(s)", due_now.len()).ok();
+        writeln!(s).ok();
+        writeln!(
+            s,
+            "_These obligations are already in force. Deferred high-risk items are listed later as preparation._"
+        )
+        .ok();
+        writeln!(s).ok();
+        for cs in &due_now {
+            writeln!(
+                s,
+                "- **[{}] {}** ({}) — {}",
+                cs.framework_ref,
+                cs.title,
+                verdict_badge(cs.verdict),
+                cs.remediation.as_deref().unwrap_or("")
+            )
+            .ok();
+        }
+        writeln!(s).ok();
+    }
+
     // Evidence.
     writeln!(s, "## Evidence").ok();
     writeln!(s).ok();
@@ -113,13 +143,18 @@ pub fn render(card: &Scorecard) -> String {
         for dim in &fw.dimensions {
             writeln!(s, "### {} — {} / 100", dim.title, dim.score.round() as i64).ok();
             writeln!(s).ok();
-            writeln!(s, "| Ref | Control | Verdict | Notes |\n|---|---|---|---|").ok();
+            writeln!(
+                s,
+                "| Ref | Control | Timeline | Verdict | Notes |\n|---|---|---|---|---|"
+            )
+            .ok();
             for cs in &dim.controls {
                 writeln!(
                     s,
-                    "| {} | {} | {} | {} |",
+                    "| {} | {} | {} | {} | {} |",
                     cs.framework_ref,
                     cs.title.replace('|', "\\|"),
+                    cs.timeline_label,
                     verdict_badge(cs.verdict),
                     control_notes(cs)
                 )
@@ -203,5 +238,7 @@ mod tests {
         assert!(md.contains("## Overall:"));
         assert!(md.contains("EU AI Act"));
         assert!(md.contains("IMDA"));
+        assert!(md.contains("Timeline"));
+        assert!(md.contains("Binding now"));
     }
 }

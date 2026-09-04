@@ -73,6 +73,9 @@
     .tag.partial { background: rgba(251,191,36,.15); color: var(--partial); }
     .tag.absent { background: rgba(248,113,113,.15); color: var(--absent); }
     .tag.not_applicable { background: rgba(100,116,139,.18); color: var(--na); }
+    .tl { font-size: .72em; margin-top: 3px; }
+    .tl.now { color: var(--exists); }
+    .tl.later { color: var(--dim); }
     .chk { display: inline-block; margin: 2px 4px 2px 0; padding: 1px 7px; border-radius: 6px; font-size: .7em; font-weight: 700; }
     .chk.pass { background: rgba(52,211,153,.14); color: var(--pass); }
     .chk.warn { background: rgba(251,191,36,.14); color: var(--warn); }
@@ -188,7 +191,7 @@
       return `<div class="dim">
         <div class="dh"><span class="dt">${esc(dim.title)}</span><span class="ds">${Math.round(dim.score)} / 100</span></div>
         <div class="bar"><span style="width:${Math.max(0,Math.min(100,dim.score))}%"></span></div>
-        <table><thead><tr><th>Ref</th><th>Control</th><th>Verdict</th><th>Detail</th></tr></thead><tbody>
+        <table><thead><tr><th>Ref</th><th>Control</th><th>Timeline</th><th>Verdict</th><th>Detail</th></tr></thead><tbody>
         ${(dim.controls||[]).map(ctrlRow).join('')}
         </tbody></table></div>`;
     }
@@ -201,9 +204,12 @@
       if(checks) detail += `<div>${checks}</div>`;
       if(cs.note) detail += `<div class="muted" style="margin-top:3px">“${esc(cs.note)}”</div>`;
       if(cs.remediation) detail += `<div class="rem">→ ${esc(cs.remediation)}</div>`;
+      const tl = cs.timeline_label || (cs.applies_now ? 'Binding now' : '');
+      const tlClass = cs.applies_now === false ? 'later' : 'now';
       return `<tr>
         <td class="muted">${esc(cs.framework_ref)}</td>
         <td>${esc(cs.title)}</td>
+        <td><span class="tl ${tlClass}">${esc(tl)}</span></td>
         <td><span class="tag ${cs.verdict}">${cs.verdict.replace('_',' ')}</span></td>
         <td>${detail || '<span class="muted">—</span>'}</td></tr>`;
     }

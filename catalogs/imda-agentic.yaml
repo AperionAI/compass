@@ -3,12 +3,13 @@ name: IMDA Model AI Governance Framework for Agentic AI
 version: "v1.5 (20 May 2026, upd. 5 June 2026)"
 source: "IMDA / AI Verify Foundation, Model AI Governance Framework for Agentic AI, v1.5, 53 pp."
 description: >
-  Self-assessment for agentic AI systems against Singapore's IMDA framework.
-  The framework's central claim is that governance belongs in a deterministic
-  enforcement plane between the agent and the systems it touches -- not in
-  prompts. Questions follow the framework's four dimensions plus the
-  cross-cutting perimeter/taint concern; automated checks corroborate the
-  identity, oversight, audit, and logging controls against exported evidence.
+  Self-assessment for agentic AI systems against Singapore's IMDA framework
+  (v1.5). The framework's central claim is that governance belongs in a
+  deterministic enforcement plane between the agent and the systems it
+  touches -- not in prompts. Questions follow the four dimensions plus
+  perimeter/taint, and v1.5 topics for multi-agent risk, memory poisoning,
+  and platform vs system-provider role. Automated checks corroborate
+  identity, oversight, audit, and logging against exported evidence.
 
 dimensions:
   - id: assess_bound
@@ -146,6 +147,33 @@ controls:
     remediation: >
       Add a gateway-wide emergency stop with off/read-only/halt modes and a
       circuit breaker, and record activations in the audit chain.
+
+  - id: multi_agent_risk
+    dimension: assess_bound
+    framework_ref: "v1.5, systemic / multi-agent"
+    title: Systemic and multi-agent risks assessed
+    question: >
+      Have you assessed risks that arise from multiple agents interacting
+      (emergent behaviour, shared tools, cascading failures) rather than
+      treating each agent as an isolated system?
+    weight: 2
+    remediation: >
+      Inventory the agent graph (who can call whom, which tools are shared)
+      and add those interactions to the risk register. A single-agent
+      review misses the failure mode v1.5 is pointing at.
+
+  - id: value_chain_role
+    dimension: assess_bound
+    framework_ref: "v1.5, value chain"
+    title: Platform-provider vs system-provider role is named
+    question: >
+      Have you named your role in the agentic value chain — platform
+      provider, system provider, or both — and matched controls to that
+      role?
+    remediation: >
+      Write down who you are in the chain. Platform providers own the
+      runtime and identity plane; system providers own the agent
+      behaviour. If you are both, say so and cover both sets of duties.
 
   # ── Dimension 2 — Make humans meaningfully accountable ─────────────────────
   - id: approval_checkpoints
@@ -336,6 +364,21 @@ controls:
     remediation: >
       Track agent versions in a signed BOM and trigger re-certification on
       material change or drift.
+
+  - id: memory_poisoning
+    dimension: technical_controls
+    framework_ref: "v1.5, memory poisoning"
+    title: Memory poisoning is treated as a control, not a prompt bug
+    question: >
+      Do you protect long-lived agent memory (retrieval stores, session
+      memory, shared scratchpads) against poisoning — untrusted writes
+      that later steer behaviour?
+    weight: 2
+    remediation: >
+      Treat memory as an integrity boundary: authenticate writes, bound
+      what can be stored, and re-verify retrieved context before it
+      becomes an instruction. Prompt-only "ignore previous" is not the
+      control.
 
   # ── Dimension 4 — Enable end-user responsibility ───────────────────────────
   - id: inform_users_actions
