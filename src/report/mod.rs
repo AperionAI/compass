@@ -1,8 +1,10 @@
-//! Report renderers: JSON, Markdown, and a self-contained HTML dashboard.
+//! Report renderers: JSON, Markdown, HTML, JUnit, and SARIF.
 
 pub mod html;
 pub mod json;
+pub mod junit;
 pub mod markdown;
+pub mod sarif;
 
 use crate::scoring::Scorecard;
 use anyhow::Result;
@@ -13,6 +15,8 @@ pub enum Format {
     Html,
     Markdown,
     Json,
+    Junit,
+    Sarif,
 }
 
 impl Format {
@@ -21,6 +25,8 @@ impl Format {
             "html" => Some(Format::Html),
             "md" | "markdown" => Some(Format::Markdown),
             "json" => Some(Format::Json),
+            "junit" | "xml" => Some(Format::Junit),
+            "sarif" => Some(Format::Sarif),
             _ => None,
         }
     }
@@ -30,6 +36,8 @@ impl Format {
             Format::Html => "html",
             Format::Markdown => "md",
             Format::Json => "json",
+            Format::Junit => "junit.xml",
+            Format::Sarif => "sarif",
         }
     }
 }
@@ -40,5 +48,7 @@ pub fn render(card: &Scorecard, format: Format) -> Result<String> {
         Format::Html => html::render(card),
         Format::Markdown => Ok(markdown::render(card)),
         Format::Json => json::render(card),
+        Format::Junit => Ok(junit::render(card)),
+        Format::Sarif => sarif::render(card),
     }
 }

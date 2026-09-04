@@ -212,7 +212,8 @@ struct DoctorArgs {
 
 #[derive(Debug, Args)]
 struct RecordArgs {
-    /// Upstream base URL to forward to (http only), e.g. http://localhost:4000.
+    /// Upstream base URL to forward to (`http://` or `https://`), e.g.
+    /// `http://localhost:4000` or `https://api.openai.com`.
     #[arg(long)]
     upstream: String,
     /// Local port to listen on.
@@ -239,7 +240,7 @@ struct ReportArgs {
     /// multiple formats are requested).
     #[arg(long, default_value = "compass-report.html")]
     out: String,
-    /// Comma-separated formats: html, md, json.
+    /// Comma-separated formats: html, md, json, junit, sarif.
     #[arg(long, default_value = "html")]
     format: String,
     /// Pass threshold (0-100) for the CI exit code.
@@ -548,7 +549,8 @@ fn cmd_report(a: ReportArgs) -> Result<i32> {
         .map(|f| f.trim())
         .filter(|f| !f.is_empty())
         .map(|f| {
-            Format::parse(f).ok_or_else(|| anyhow!("unknown format '{f}' (use html, md, json)"))
+            Format::parse(f)
+                .ok_or_else(|| anyhow!("unknown format '{f}' (use html, md, json, junit, sarif)"))
         })
         .collect::<Result<_>>()?;
     if formats.is_empty() {
@@ -580,7 +582,7 @@ fn cmd_report(a: ReportArgs) -> Result<i32> {
 }
 
 fn strip_known_ext(out: &str) -> String {
-    for ext in [".html", ".md", ".json"] {
+    for ext in [".junit.xml", ".sarif", ".html", ".md", ".json", ".xml"] {
         if let Some(stripped) = out.strip_suffix(ext) {
             return stripped.to_string();
         }

@@ -1,0 +1,20 @@
+# Equivalent controls across the bundled catalogs.
+# An unanswered control inherits the first non-unanswered answer from any
+# other id in its group. Native answers always win. Groups are conservative —
+# only mappings where the duty is the same kind of control.
+version: 1
+links:
+  - reason: automatic logging of every interaction
+    ids: [art_12_logging, art_26_deployer_logs, log_all_interactions]
+  - reason: tamper-evident audit chain
+    ids: [art_12_traceability, tamper_proof_audit]
+  - reason: human approval before irreversible actions
+    ids: [art_14_oversight_design, approval_checkpoints]
+  - reason: ability to stop or bound blast radius
+    ids: [art_14_intervention, blast_radius]
+  - reason: oversight effectiveness, not ceremonial sign-off
+    ids: [art_14_oversight_effectiveness, track_override_rate, track_response_time, detect_outlier_reviewers]
+  - reason: users know they are dealing with an AI system
+    ids: [art_50_disclosure, inform_users_actions]
+  - reason: deterministic controls rather than prompt instructions
+    ids: [art_15_robustness_security, structural_controls]

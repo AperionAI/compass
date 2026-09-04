@@ -9,10 +9,14 @@ week or two, then assess against real traffic.
 ## Start it
 
 ```bash
+# Local gateway / model server
 compass record --upstream http://localhost:4000 --port 8788 --out compass-record.jsonl
+
+# Hosted API (TLS is terminated by Compass)
+compass record --upstream https://api.openai.com --port 8788 --out compass-record.jsonl
 ```
 
-- `--upstream` — where to forward (http only; see TLS note below)
+- `--upstream` — where to forward (`http://` or `https://`)
 - `--port` — where your app connects (default 8788)
 - `--out` — the JSONL file it writes (default `compass-record.jsonl`)
 - `--hmac-key` — optional; when omitted, a key is generated and written to
@@ -27,7 +31,8 @@ client = OpenAI(base_url="http://localhost:8788/v1", api_key="…")
 
 Your API key and headers pass straight through to the upstream. Compass reads
 the request and response to record the model, user, and tool calls — it does
-not alter them.
+not alter them. Streaming (`stream: true`) is passed through as chunks arrive;
+Compass still seals a copy into the chain.
 
 ## What it writes
 
@@ -56,18 +61,15 @@ than forking it.
 
 ## Supported upstreams
 
-Any OpenAI-compatible endpoint over **http**:
+Any OpenAI-compatible endpoint:
 
+- Hosted: OpenAI, Azure OpenAI, Anthropic-compatible gateways
 - Local model servers: Ollama (`:11434/v1`), vLLM, LM Studio, LocalAI
 - Gateways: LiteLLM (`:4000`), your own proxy
 
-## TLS note
-
-This build forwards to `http://` upstreams only. To record traffic bound for a
-hosted HTTPS API (OpenAI, Anthropic, Bedrock), put a local gateway such as
-LiteLLM in front — your app → `compass record` (http) → LiteLLM → provider
-(https). LiteLLM terminates TLS; Compass records the exchange. Direct-HTTPS
-upstream support is on the roadmap.
+HTTPS uses rustls with Mozilla's webpki roots. If a corporate proxy intercepts
+TLS with a custom CA that isn't in that set, put LiteLLM (or similar) in
+front and point Compass at the local http port.
 
 ## Privacy
 

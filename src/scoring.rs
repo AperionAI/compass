@@ -261,6 +261,7 @@ pub fn score(
     let mut overall_counts = VerdictCounts::default();
     let mut all_controls_for_overall: Vec<ControlScore> = Vec::new();
     let as_of = chrono::Utc::now().date_naive();
+    let walk = crate::crosswalk::Crosswalk::bundled().ok();
 
     for cat in catalogs {
         let fa = assessment.framework(&cat.framework);
@@ -272,10 +273,22 @@ pub fn score(
             let mut dim_counts = VerdictCounts::default();
             let mut dim_controls = Vec::new();
             for control in cat.controls.iter().filter(|c| c.dimension == dim.id) {
-                let (answer, note) = fa
+                let (mut answer, mut note) = fa
                     .and_then(|f| f.answer_for(&control.id))
                     .map(|a| (a.answer, a.note.clone()))
                     .unwrap_or((Answer::Unanswered, None));
+                if answer == Answer::Unanswered {
+                    if let Some(w) = &walk {
+                        if let Some((inherited, src)) = w.inherit(&control.id, assessment) {
+                            answer = inherited;
+                            let extra = format!("inherited from {src} via crosswalk");
+                            note = match note {
+                                Some(n) if !n.trim().is_empty() => Some(format!("{n}; {extra}")),
+                                _ => Some(extra),
+                            };
+                        }
+                    }
+                }
                 let cs = score_control(control, answer, note, evidence, as_of);
                 dim_counts.tally(cs.verdict, cs.answer);
                 fw_counts.tally(cs.verdict, cs.answer);
@@ -475,6 +488,28 @@ mod tests {
             art9.timeline_label.contains("2027"),
             "got {}",
             art9.timeline_label
+        );
+    }
+
+    #[test]
+    fn unanswered_imda_logging_inherits_from_eu() {
+        let cats = catalog::load_selection(&["eu".into(), "imda".into()]).unwrap();
+        let mut a = Assessment::scaffold(&cats);
+        answer_all(&mut a, "eu-ai-act", Answer::Yes);
+        // IMDA stays unanswered.
+        let sc = score(&cats, &a, &EvidenceBundle::default(), 70.0);
+        let log = sc
+            .frameworks
+            .iter()
+            .flat_map(|f| f.dimensions.iter())
+            .flat_map(|d| d.controls.iter())
+            .find(|c| c.control_id == "log_all_interactions")
+            .unwrap();
+        assert_eq!(log.verdict, Verdict::Exists);
+        assert!(
+            log.note.as_deref().unwrap_or("").contains("art_12_logging"),
+            "got {:?}",
+            log.note
         );
     }
 }

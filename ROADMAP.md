@@ -77,17 +77,19 @@ Install:
 - `compass attest` is in the commands table. GitHub about / README
   license one-liner: free to run, inspectable source, binary license.
 
-## v0.5 — HTTPS record, CI output, crosswalk
+## v0.5 — shipped: HTTPS record, CI output, EU↔IMDA crosswalk
 
-Still from the earlier plan, next up:
+- **[SHIPPED v0.5] `compass record` HTTPS + SSE.** `--upstream https://…`
+  uses rustls (webpki roots). Streaming responses are teed to the client
+  as chunks arrive; Compass still seals a copy into the chain.
+- **[SHIPPED v0.5] JUnit XML and SARIF.** `compass report --format
+  junit,sarif` writes `*.junit.xml` and `*.sarif` for PR annotation.
+- **[SHIPPED v0.5] EU ↔ IMDA crosswalk.** Unanswered controls inherit a
+  native answer from a mapped peer (`catalogs/crosswalk.yaml`). The
+  scorecard note says so. NIST is still a later catalog.
 
-- **`compass record` HTTPS + SSE** — today it forwards to http
-  upstreams only. Direct-HTTPS and SSE pass-through so a hosted API
-  can be recorded without a local LiteLLM in front.
-- **CI-native output** — JUnit XML and SARIF so `compass report`
-  annotates PRs; a reference GitHub Action.
-- **Framework crosswalk** — map equivalent controls across EU / IMDA /
-  NIST so one answered assessment scores against every catalog.
+## v0.6 — next
+
 - **NIST AI RMF catalog** (GOVERN / MAP / MEASURE / MANAGE).
 - **MCP trust-registry check** — ingest an exported server allowlist.
 - **Emergency-stop evidence** — recognise kill-switch events in the chain.
@@ -95,6 +97,7 @@ Still from the earlier plan, next up:
 - **Non-interactive answers** — `compass assess --set control=yes`.
 - IMDA leftovers: deeper threat-modelling / taint, agentic-commerce
   protocols (ACP, AP2).
+- Crosswalk coverage for NIST once that catalog exists.
 
 ## v0.2 / v0.3 — already shipped (evidence path)
 
@@ -115,7 +118,7 @@ Getting the evidence in the first place:
   playbook link. Gaps are findings, not failures.
 - **[SHIPPED v0.2] `compass record`** — localhost OpenAI-compatible
   proxy. Point your SDK's `base_url` at it and every call is written as
-  hash-chained JSONL.
+  hash-chained JSONL. HTTPS + SSE pass-through shipped in v0.5.
 - **[SHIPPED v0.3] Signed attestation** — `compass attest generate` /
   `verify`.
 

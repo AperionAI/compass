@@ -111,8 +111,8 @@ compass ingest --from bedrock  --input bedrock-invocations.jsonl
 compass ingest --from csv-approvals --input approvals.csv   # Jira/ServiceNow export
 
 # Or capture it from live traffic: run this in front of your model
-# endpoint, point your SDK's base_url at it, come back in two weeks.
-compass record --upstream http://localhost:4000 --out compass-record.jsonl
+# endpoint (http or https), point your SDK's base_url at it.
+compass record --upstream https://api.openai.com --out compass-record.jsonl
 
 # Then see exactly what's still missing and how to fix each gap
 compass doctor
@@ -158,8 +158,8 @@ want to compile it yourself.
 | `compass assess` | Interactive questionnaire → `compass-assessment.yaml` (add `--defaults` to scaffold an editable file). |
 | `compass ingest` | Register evidence files; or `--from openai\|litellm\|bedrock\|csv\|csv-approvals --input <export>` to convert a native export into evidence first. |
 | `compass doctor` | Show which automated checks have evidence and, for every gap, the exact step to close it. |
-| `compass record` | Localhost OpenAI-compatible proxy that captures a tamper-evident log from live traffic. |
-| `compass report` | Score answers + evidence; write HTML / Markdown / JSON. Binding-now vs prepare-by dates show on each EU control. |
+| `compass record` | Localhost OpenAI-compatible proxy that captures a tamper-evident log from live traffic (`http://` or `https://` upstreams; SSE is passed through). |
+| `compass report` | Score answers + evidence; write HTML / Markdown / JSON / JUnit / SARIF. Binding-now vs prepare-by dates show on each EU control. Unanswered controls inherit from a mapped peer when both frameworks are selected. |
 | `compass serve` | Live localhost dashboard with a re-scan button. |
 | `compass verify` | Standalone tamper-evident audit-chain verification. |
 | `compass attest` | `generate` a signed attestation bundle; `verify` one offline. |
@@ -173,8 +173,16 @@ pull request and enforced in CI:
 
 ```yaml
 # .github/workflows/governance.yml (excerpt)
-- run: compass report --out report.html --threshold 80
+- run: compass report --out report --format html,junit,sarif --threshold 80
   # exit 0 = at/above threshold · 1 = below · 2 = evidence integrity failure
+- uses: actions/upload-artifact@v4
+  if: always()
+  with:
+    name: compass-report
+    path: |
+      report.html
+      report.junit.xml
+      report.sarif
 ```
 
 CI exit codes:
@@ -199,7 +207,7 @@ concepts, same evidence formats — one measures, the other enforces.
 | Audit | Verifies an exported chain | Produces the tamper-evident chain |
 | Oversight | Scores exported tickets | Runs the approval queue |
 | Action risk | Tiers logged calls | Blocks/holds T3 actions before they run |
-| Reports | HTML / MD / JSON | Live console + regulator API |
+| Reports | HTML / MD / JSON / JUnit / SARIF | Live console + regulator API |
 | Data | Never leaves your machine | On-prem / in your cluster |
 
 Remediation text in reports links to the governance patterns at
@@ -216,10 +224,10 @@ Remediation text in reports links to the governance patterns at
 - **HMAC credentials aren't offline-verifiable.** Only Ed25519 (public
   key) credentials can be checked without a secret; HMAC ones are
   reported as "unverifiable", not "valid".
-- **`compass record` forwards to http upstreams.** For a hosted HTTPS
-  API, put a local gateway (e.g. LiteLLM) in front — see
-  [docs/evidence/record.md](docs/evidence/record.md). Direct-HTTPS
-  upstreams and SSE streaming pass-through are on the roadmap.
+- **`compass record` talks to the upstream you name.** http and https both
+  work. HTTPS uses rustls with Mozilla's webpki roots (corporate TLS
+  intercept that isn't in that set will fail). Streaming responses are
+  passed through as they arrive.
 - **Not legal advice.** This is a preparation aid, not a conformity
   assessment, and not a substitute for a notified body, counsel, or
   your regulator. The control catalogs are our reading of the

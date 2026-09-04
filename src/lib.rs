@@ -10,15 +10,18 @@
 //! - [`evidence`] — offline checks over exported files (audit-chain integrity,
 //!   human oversight, action-risk coverage, agent identity, logging
 //!   completeness).
+//! - [`crosswalk`] — equivalent controls across catalogs; unanswered items
+//!   inherit a peer's answer so one assessment scores against every framework.
 //! - [`scoring`] — combine answers + evidence into verdicts and a 0-100 score.
-//! - [`report`] — JSON / Markdown / self-contained HTML renderers.
+//! - [`report`] — JSON / Markdown / HTML / JUnit / SARIF renderers.
 //! - [`serve`] — a tiny std-only local dashboard server.
 //! - [`adapters`] — native-export → canonical-JSONL converters (OpenAI,
 //!   LiteLLM, Bedrock, CSV) so existing logs become usable evidence.
 //! - [`doctor`] — the evidence gap report: what can't be proven yet, and how
 //!   to gather it.
-//! - [`record`] — a std-only OpenAI-compatible recording proxy that captures
-//!   tamper-evident evidence from live traffic.
+//! - [`record`] — a std-only OpenAI-compatible recording proxy (http or
+//!   https upstreams, SSE pass-through) that captures tamper-evident evidence
+//!   from live traffic.
 //! - [`attest`] — assemble + Ed25519-sign an offline-verifiable attestation
 //!   bundle (posture + evidence + audit-chain anchor), and verify one.
 
@@ -26,6 +29,7 @@ pub mod action_risk;
 pub mod adapters;
 pub mod attest;
 pub mod catalog;
+pub mod crosswalk;
 pub mod doctor;
 pub mod evidence;
 pub mod questionnaire;

@@ -69,7 +69,7 @@ fn binary_report_writes_all_formats_and_exits_pass() {
             "--out",
             out.to_str().unwrap(),
             "--format",
-            "html,md,json",
+            "html,md,json,junit,sarif",
         ])
         .status()
         .unwrap();
@@ -77,6 +77,8 @@ fn binary_report_writes_all_formats_and_exits_pass() {
     assert!(dir.path().join("report.html").exists());
     assert!(dir.path().join("report.md").exists());
     assert!(dir.path().join("report.json").exists());
+    assert!(dir.path().join("report.junit.xml").exists());
+    assert!(dir.path().join("report.sarif").exists());
 }
 
 #[test]
